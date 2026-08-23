@@ -6,17 +6,27 @@ import asyncio
 import aiohttp
 import telebot
 from telethon.sync import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.tl.types import Message
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO -------------------
-API_ID = int(os.getenv("API_ID", "30861149"))
-API_HASH = os.getenv("API_HASH", "8e41ffe6c0d5b5609bc5129628d1f3e4")
-PHONE_NUMBER = os.getenv("PHONE_NUMBER", "+584123889230")   # tu número de Telegram
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8545721791:AAHAk78dr1-jMDR6M-Un_vjVPwmUxYTTl-A")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003363707812"))  # ID del canal de destino
-SESSION_NAME = "scam_session"  # nombre del archivo .session (se generará localmente)
+# ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO (OBLIGATORIAS) -------------------
+def get_env_var(name: str, required: bool = True) -> str:
+    value = os.getenv(name)
+    if required and value is None:
+        raise EnvironmentError(f"Variable de entorno {name} no definida. Es obligatoria.")
+    return value
 
+API_ID = int(get_env_var("API_ID"))
+API_HASH = get_env_var("API_HASH")
+BOT_TOKEN = get_env_var("BOT_TOKEN")
+CHANNEL_ID = int(get_env_var("CHANNEL_ID"))
+PHONE_NUMBER = os.getenv("PHONE_NUMBER")  # opcional, solo si se usa archivo .session
+
+# Session String (opcional pero recomendado)
+SESSION_STRING = os.getenv("SESSION_STRING")
+
+# Imágenes (no sensibles, pueden quedar)
 IMAGES_URL = [
     'https://i.pinimg.com/736x/78/39/79/7839791ce7428f1cacae903e034bffc0.jpg',
     'https://i.pinimg.com/736x/8f/dc/d8/8fdcd87fccba7f4a969b33b04823560d.jpg',
@@ -31,8 +41,14 @@ bot = telebot.TeleBot(BOT_TOKEN)
 processed_cards = set()
 cards_in_progress = set()
 
-# ------------------- CLIENTE DE TELEGRAM -------------------
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+# ------------------- CLIENTE DE TELEGRAM (con soporte para StringSession) -------------------
+if SESSION_STRING:
+    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+else:
+    # Fallback a archivo .session (necesita PHONE_NUMBER para la primera autenticación)
+    if not PHONE_NUMBER:
+        raise EnvironmentError("PHONE_NUMBER es obligatorio si no usas SESSION_STRING.")
+    client = TelegramClient("scam_session", API_ID, API_HASH)
 
 # ------------------- FUNCIONES AUXILIARES -------------------
 async def get_bin_info(bin_number: str) -> dict:
@@ -64,7 +80,6 @@ def extract_card_info(text: str) -> dict | None:
         r'Card\s*[⇾»➸-]\s*(\d{14,16})[|:](\d{1,2})[|:](\d{2,4})[|:](\d{3,4})',
         r'CC\s*[≠:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
         r'Tarjeta\s*➸\s*\[(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\]',
-        # ... puedes añadir más patrones según necesites
     ]
     match_cc = None
     for pat in card_patterns:
@@ -79,7 +94,6 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
 
     # ---------- FILTRADO DE APROBACIÓN ----------
-    # Buscar indicadores de éxito (aprobado, live, charged) con emoji positivo
     success_pattern = r'[✅💎✓].*?(?:CHARGE|CHARGED|APPROVED|APROBADA|LIVE)'
     reject_pattern = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED'
 
@@ -92,18 +106,15 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRACCIÓN DE CAMPOS ----------
     def extract_field(keywords, default="Not Found"):
-        """Busca un campo etiquetado en el mensaje."""
         pattern = r'.*?(?:' + keywords + r')\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]*)'
         match = re.search(pattern, text, re.IGNORECASE)
         return match.group(1).strip() if match else default
 
     gateway = extract_field(r'GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲')
-    # Limpiar gateway
     gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()
     gateway = re.sub(r'^#', '', gateway).strip()
 
     status = extract_field(r'STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭')
-    # Limpiar emojis del status (solo para mostrar)
     status_clean = re.sub(r'[✅💎✓]', '', status).strip()
     if not status_clean:
         status = "Approved ✓"
@@ -113,7 +124,7 @@ def extract_card_info(text: str) -> dict | None:
     if response.upper() == "(ADDED) APPROVED":
         response = "Approved"
 
-    bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
+    bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝙖𝙣𝙠|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
 
     country = extract_field(r'COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲')
     flag = "❓"
@@ -124,17 +135,15 @@ def extract_card_info(text: str) -> dict | None:
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
 
     # Intentar extraer brand/type/level desde el campo "BIN INFO"
-    bin_info = extract_field(r'BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
+    bin_info = extract_field(r'BIN|𝘽𝙞𝙣|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
     brand = "Unknown"
     card_type = "Unknown"
     level = "Unknown"
     if bin_info:
-        # Limpiar y separar
         bin_info = re.sub(r'^\[\d{6}\]\s*', '', bin_info).strip()
         bin_info = re.sub(r'^\s*\(|\)\s*$', '', bin_info).strip()
         parts = [p.strip() for p in re.split(r'[-|]', bin_info) if p.strip()]
         if parts:
-            # Primera parte puede ser la marca
             if parts[0].upper() in ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER']:
                 brand = parts.pop(0)
             if parts:
@@ -142,21 +151,15 @@ def extract_card_info(text: str) -> dict | None:
             if parts:
                 level = parts.pop(0)
             if parts:
-                # el resto puede ser el banco o país
                 rest = ' '.join(parts)
-                # Si no hay bank, lo usamos
                 if bank == "Not Found":
                     bank = rest
-                # Si no hay country, lo usamos
                 if country == "Not Found" or not country:
                     country = rest
-        # Si hay una bandera al final, extraerla
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', bin_info)
         if flag_match:
             flag = flag_match.group(1)
 
-    # Si la API da mejor info, la usamos (pero asíncrono se hará después)
-    # Devolvemos los datos extraídos
     return {
         "card_info": card_info,
         "bin_number": bin_num,
@@ -173,22 +176,15 @@ def extract_card_info(text: str) -> dict | None:
     }
 
 def generate_extrapolated(card_info: str) -> tuple:
-    """Genera tres tarjetas extrapoladas."""
     cc, month, year, cvv = card_info.split('|')
-    # Primera: ocultar últimos 4 dígitos
     cc1 = cc[:12] + 'xxxx'
     ext1 = f"{cc1}|{month}|{year}|rnd"
-
-    # Segunda: cambiar un dígito aleatorio
     rand_digit = random.randint(0, 9)
     cc2 = cc[:11] + str(rand_digit) + 'xxxx'
     ext2 = f"{cc2}|{month}|{year}|rnd"
-
-    # Tercera: cambiar dos dígitos
     rand_digits = random.randint(10, 99)
     cc3 = cc[:10] + str(rand_digits) + 'xxxx'
     ext3 = f"{cc3}|{month}|{year}|rnd"
-
     return ext1, ext2, ext3
 
 # ------------------- MANEJADOR DE MENSAJES -------------------
@@ -201,7 +197,6 @@ async def handler(event):
     if not msg.text:
         return
 
-    # Extraer información
     card_data = extract_card_info(msg.text)
     if not card_data:
         return
@@ -219,10 +214,7 @@ async def handler(event):
     cards_in_progress.add(card_clean)
 
     try:
-        # Obtener información del BIN desde la API (asíncrono)
         bin_info_api = await get_bin_info(card_data['bin_number'])
-
-        # Combinar datos: preferir API si tiene datos válidos
         if bin_info_api.get('brand') and bin_info_api['brand'] != 'N/A':
             card_data['brand'] = bin_info_api['brand']
         if bin_info_api.get('type') and bin_info_api['type'] != 'N/A':
@@ -236,10 +228,8 @@ async def handler(event):
         if bin_info_api.get('country_flag') and bin_info_api['country_flag'] != '❓':
             card_data['flag'] = bin_info_api['country_flag']
 
-        # Generar extrapoladas
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
-        # Construir mensaje
         custom_message = f"""
 ✸ 𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
 
@@ -269,7 +259,6 @@ async def handler(event):
 
         image_url = random.choice(IMAGES_URL)
 
-        # Enviar con retries
         for attempt in range(3):
             try:
                 await asyncio.to_thread(
@@ -300,9 +289,16 @@ async def handler(event):
 # ------------------- ARRANQUE -------------------
 async def main():
     print("Iniciando cliente de Telegram...")
-    await client.start(phone=PHONE_NUMBER)   # Si la sesión ya existe, no pedirá código
+    if SESSION_STRING:
+        await client.start()
+    else:
+        # Si no hay SESSION_STRING, se necesita PHONE_NUMBER
+        await client.start(phone=PHONE_NUMBER)
     print("¡Bot en ejecución! Esperando mensajes...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except EnvironmentError as e:
+        print(f"Error de configuración: {e}")
