@@ -22,11 +22,11 @@ SESSION_STRING = os.getenv("SESSION_STRING", None)
 SESSION_NAME = "scam_session" if not SESSION_STRING else None
 
 IMAGES_URL = [
-    'https://i.pinimg.com/736x/78/39/79/7839791ce7428f1cacae903e034bffc0.jpg',
-    'https://i.pinimg.com/736x/8f/dc/d8/8fdcd87fccba7f4a969b33b04823560d.jpg',
-    'https://i.pinimg.com/736x/c6/77/33/c6773365ea8c89a1670f14739f1af1b1.jpg',
-    'https://i.pinimg.com/736x/1c/42/6e/1c426e05aedbf7aa8a685df6f9b6f7f6.jpg',
-    'https://i.pinimg.com/736x/74/40/b7/7440b7d0bbb8b2500cb6969d138a7f6a.jpg',
+    'https://i.pinimg.com/736x/20/af/cf/20afcf4beeb219fb55e90ca19a8131c9.jpg',
+    'https://i.pinimg.com/736x/0b/41/fd/0b41fdc1fac4dc91e4531c20e1046213.jpg',
+    'https://i.pinimg.com/736x/7a/cd/cd/7acdcd93235fdf7f3fdc2263d203e921.jpg',
+    'https://i.pinimg.com/736x/d2/fa/9b/d2fa9b36007562e3a3954810cc73dac4.jpg',
+    'https://i.pinimg.com/736x/cc/b0/ae/ccb0aec3b037cd980f5947c2077a4647.jpg',
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
