@@ -10,23 +10,19 @@ from telethon.sessions import StringSession
 from telethon.tl.types import Message
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO (OBLIGATORIAS) -------------------
-def get_env_var(name: str, required: bool = True) -> str:
-    value = os.getenv(name)
-    if required and value is None:
-        raise EnvironmentError(f"Variable de entorno {name} no definida. Es obligatoria.")
-    return value
+# ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO -------------------
+API_ID = int(os.getenv("API_ID", "30861149"))
+API_HASH = os.getenv("API_HASH", "8e41ffe6c0d5b5609bc5129628d1f3e4")
+PHONE_NUMBER = os.getenv("PHONE_NUMBER", "+584123889230")   # solo necesario si usas archivo .session
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8545721791:AAHAk78dr1-jMDR6M-Un_vjVPwmUxYTTl-A")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003363707812"))
 
-API_ID = int(get_env_var("API_ID"))
-API_HASH = get_env_var("API_HASH")
-BOT_TOKEN = get_env_var("BOT_TOKEN")
-CHANNEL_ID = int(get_env_var("CHANNEL_ID"))
-PHONE_NUMBER = os.getenv("PHONE_NUMBER")  # opcional, solo si se usa archivo .session
+# --- Session String (recomendado para Railway) ---
+SESSION_STRING = os.getenv("SESSION_STRING", None)
 
-# Session String (opcional pero recomendado)
-SESSION_STRING = os.getenv("SESSION_STRING")
+# Si no hay SESSION_STRING, usará el archivo "scam_session.session" (fallback)
+SESSION_NAME = "scam_session" if not SESSION_STRING else None
 
-# Imágenes (no sensibles, pueden quedar)
 IMAGES_URL = [
     'https://i.pinimg.com/736x/78/39/79/7839791ce7428f1cacae903e034bffc0.jpg',
     'https://i.pinimg.com/736x/8f/dc/d8/8fdcd87fccba7f4a969b33b04823560d.jpg',
@@ -45,10 +41,7 @@ cards_in_progress = set()
 if SESSION_STRING:
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 else:
-    # Fallback a archivo .session (necesita PHONE_NUMBER para la primera autenticación)
-    if not PHONE_NUMBER:
-        raise EnvironmentError("PHONE_NUMBER es obligatorio si no usas SESSION_STRING.")
-    client = TelegramClient("scam_session", API_ID, API_HASH)
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 # ------------------- FUNCIONES AUXILIARES -------------------
 async def get_bin_info(bin_number: str) -> dict:
@@ -80,6 +73,7 @@ def extract_card_info(text: str) -> dict | None:
         r'Card\s*[⇾»➸-]\s*(\d{14,16})[|:](\d{1,2})[|:](\d{2,4})[|:](\d{3,4})',
         r'CC\s*[≠:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
         r'Tarjeta\s*➸\s*\[(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\]',
+        # Añade más patrones si necesitas
     ]
     match_cc = None
     for pat in card_patterns:
@@ -94,6 +88,7 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
 
     # ---------- FILTRADO DE APROBACIÓN ----------
+    # Buscar indicadores de éxito (aprobado, live, charged) con emoji positivo
     success_pattern = r'[✅💎✓].*?(?:CHARGE|CHARGED|APPROVED|APROBADA|LIVE)'
     reject_pattern = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED'
 
@@ -106,6 +101,7 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRACCIÓN DE CAMPOS ----------
     def extract_field(keywords, default="Not Found"):
+        """Busca un campo etiquetado en el mensaje."""
         pattern = r'.*?(?:' + keywords + r')\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]*)'
         match = re.search(pattern, text, re.IGNORECASE)
         return match.group(1).strip() if match else default
@@ -124,7 +120,7 @@ def extract_card_info(text: str) -> dict | None:
     if response.upper() == "(ADDED) APPROVED":
         response = "Approved"
 
-    bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝙖𝙣𝙠|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
+    bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
 
     country = extract_field(r'COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲')
     flag = "❓"
@@ -135,7 +131,7 @@ def extract_card_info(text: str) -> dict | None:
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
 
     # Intentar extraer brand/type/level desde el campo "BIN INFO"
-    bin_info = extract_field(r'BIN|𝘽𝙞𝙣|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
+    bin_info = extract_field(r'BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
     brand = "Unknown"
     card_type = "Unknown"
     level = "Unknown"
@@ -176,6 +172,7 @@ def extract_card_info(text: str) -> dict | None:
     }
 
 def generate_extrapolated(card_info: str) -> tuple:
+    """Genera tres tarjetas extrapoladas."""
     cc, month, year, cvv = card_info.split('|')
     cc1 = cc[:12] + 'xxxx'
     ext1 = f"{cc1}|{month}|{year}|rnd"
@@ -230,27 +227,28 @@ async def handler(event):
 
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
+        # ---------- NUEVA PLANTILLA DE MENSAJE ----------
         custom_message = f"""
-✸ 𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
+✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
 
-⋆.𐙚 | 𝗖𝗖 →  <code>{card_data['card_info']}</code>  
-⋆.𐙚 | 𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data['status']}
-⋆.𐙚 | 𝗚𝗔𝗧𝗘𝗪𝗔𝗬 → {card_data['gateway']}   
-⋆.𐙚 | 𝗦𝗖𝗔𝗠 𝗗𝗔𝗧𝗘 → {time.strftime('%d - %m - %Y')}
+✦  |  𝗖𝗖 →  <code>{card_data['card_info']}</code>  
+✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data['status']}
+✦  |  𝗚𝗔𝗧𝗘𝗪𝗔𝗬 → {card_data['gateway']}    
+✦  |  𝗦𝗖𝗔𝗠 𝗗𝗔𝗧𝗘 → {time.strftime('%d - %m - %Y')}
 
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
-꒰ঌ ໒꒱ | 𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {card_data['response']}
-꒰ঌ ໒꒱ | 𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['bank']}
-꒰ঌ ໒꒱ | 𝗕𝗔𝗡𝗞 → {card_data['brand']}
-꒰ঌ ໒꒱ | 𝗖𝗢𝗨𝗡𝗧𝗥𝗬 → {card_data['country']} [{card_data['flag']}]
+⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {card_data['response']}
+⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['bank']}
+⊹    |  𝗕𝗔𝗡𝗞 → {card_data['brand']}
+⊹    |  𝗖𝗢𝗨𝗡𝗧𝗥𝗬 → {card_data['country']} [{card_data['flag']}]
  
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 
-✿  —⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝖳𝖱𝖠𝖲
+ 𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝖳𝖱𝖠𝖲
 
-➜ <code>{ext1}</code>  
-➜ <code>{ext2}</code>  
-➜ <code>{ext3}</code> 
+⇢ <code>{ext1}</code>  
+⇢ <code>{ext2}</code>   
+⇢ <code>{ext3}</code> 
 """
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton("𖥻 INFO", url="https://t.me/infocherrys"),
@@ -290,15 +288,13 @@ async def handler(event):
 async def main():
     print("Iniciando cliente de Telegram...")
     if SESSION_STRING:
+        # Con string session, ya está autenticado; start() sin argumentos
         await client.start()
     else:
-        # Si no hay SESSION_STRING, se necesita PHONE_NUMBER
+        # Con archivo, necesitas el número (solo la primera vez)
         await client.start(phone=PHONE_NUMBER)
     print("¡Bot en ejecución! Esperando mensajes...")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except EnvironmentError as e:
-        print(f"Error de configuración: {e}")
+    asyncio.run(main())
