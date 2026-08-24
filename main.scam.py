@@ -13,14 +13,12 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 # ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO -------------------
 API_ID = int(os.getenv("API_ID", "30861149"))
 API_HASH = os.getenv("API_HASH", "8e41ffe6c0d5b5609bc5129628d1f3e4")
-PHONE_NUMBER = os.getenv("PHONE_NUMBER", "+584123889230")   # solo necesario si usas archivo .session
+PHONE_NUMBER = os.getenv("PHONE_NUMBER", "+584123889230")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8545721791:AAHAk78dr1-jMDR6M-Un_vjVPwmUxYTTl-A")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003363707812"))
 
 # --- Session String (recomendado para Railway) ---
 SESSION_STRING = os.getenv("SESSION_STRING", None)
-
-# Si no hay SESSION_STRING, usará el archivo "scam_session.session" (fallback)
 SESSION_NAME = "scam_session" if not SESSION_STRING else None
 
 IMAGES_URL = [
@@ -32,12 +30,10 @@ IMAGES_URL = [
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
-# Conjuntos para evitar duplicados y procesamiento concurrente
 processed_cards = set()
 cards_in_progress = set()
 
-# ------------------- CLIENTE DE TELEGRAM (con soporte para StringSession) -------------------
+# ------------------- CLIENTE DE TELEGRAM -------------------
 if SESSION_STRING:
     client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 else:
@@ -45,7 +41,6 @@ else:
 
 # ------------------- FUNCIONES AUXILIARES -------------------
 async def get_bin_info(bin_number: str) -> dict:
-    """Obtiene información del BIN desde la API pública."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://bins.antipublic.cc/bins/{bin_number}") as resp:
@@ -56,17 +51,22 @@ async def get_bin_info(bin_number: str) -> dict:
     return {"brand": "N/A", "type": "N/A", "level": "N/A",
             "bank": "N/A", "country_name": "N/A", "country_flag": "❓"}
 
+def clean_text(text: str) -> str:
+    """Limpia caracteres no deseados como **, `, comillas, etc."""
+    if not text or text == "Not Found":
+        return text
+    # Elimina **, __, `, comillas dobles/simples, y espacios extra
+    cleaned = re.sub(r'[\*\`"\']', '', text)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
 def extract_card_info(text: str) -> dict | None:
-    """
-    Extrae la información de la tarjeta del mensaje.
-    Retorna un diccionario con los campos o None si no es aprobada.
-    """
     text_upper = text.upper()
     print("\n--- Procesando mensaje ---")
     print(text[:500] + "..." if len(text) > 500 else text)
     print("---")
 
-    # ---------- PATRONES PARA CAPTURAR CC|MM|YY|CVV ----------
+    # ---------- PATRONES CC ----------
     card_patterns = [
         r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
         r'(\d{14,16}):(\d{1,2}):(\d{2,4}):(\d{3,4})',
@@ -82,24 +82,19 @@ def extract_card_info(text: str) -> dict | None:
         if match_cc:
             break
     if not match_cc:
-        print("No se encontró número de tarjeta. Ignorando.")
         return None
 
     cc, month, year, cvv = match_cc.groups()
     card_info = f"{cc}|{month}|{year}|{cvv}"
     bin_num = cc[:6]
 
-    # ---------- FILTRADO DE APROBACIÓN (MÁS FLEXIBLE) ----------
-    # Palabras clave de éxito (sin emoji obligatorio)
+    # ---------- FILTRADO DE APROBACIÓN ----------
     success_keywords = r'(?:APPROVED|APROBADA|LIVE|CHARGED|CHARGE|AUTH|AUTHORIZED)'
-    # Palabras clave de rechazo
     reject_keywords = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED|EXPIRED'
 
-    # Buscar éxito en el texto (puede tener o no emoji)
     has_success = re.search(success_keywords, text_upper, re.IGNORECASE)
     has_reject = re.search(reject_keywords, text_upper, re.IGNORECASE)
 
-    # Si no hay éxito o hay rechazo, ignoramos
     if not has_success:
         print("No se encontró palabra de aprobación. Ignorando.")
         return None
@@ -107,102 +102,92 @@ def extract_card_info(text: str) -> dict | None:
         print("Se encontró indicador de rechazo. Ignorando.")
         return None
 
-    # ---------- EXTRACCIÓN DE CAMPOS (mejorada) ----------
+    # ---------- EXTRACCIÓN DE CAMPOS ----------
     def extract_field(keywords, default="Not Found"):
         pattern = r'.*?(?:' + keywords + r')\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]*)'
         match = re.search(pattern, text, re.IGNORECASE)
-        return match.group(1).strip() if match else default
+        if match:
+            return clean_text(match.group(1).strip())
+        return default
 
-    # GATEWAY - primero buscar etiqueta
+    # GATEWAY
     gateway = extract_field(r'GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲')
     if gateway == "Not Found":
-        # Intentar extraer de la primera línea (típico: "ϯ EAGLE 🦅 / Braintree")
         first_line = text.split('\n')[0].strip()
-        # Buscar patrones como "Braintree", "Stripe", "Payflow", "Auth", etc.
         gateway_candidates = re.findall(r'\b(BRAINTREE|STRIPE|PAYFLOW|AUTH|EAGLE|CHECKER|CHK|GATEWAY)\b', first_line, re.IGNORECASE)
         if gateway_candidates:
             gateway = ' '.join(gateway_candidates).strip()
         else:
-            # Si no, intentar capturar todo después de un separador en la primera línea
-            # Ej: "ϯ EAGLE 🦅 / Braintree" -> capturar "Braintree"
             match = re.search(r'[/\-]\s*([a-zA-Z0-9\s]+)', first_line)
             if match:
-                gateway = match.group(1).strip()
+                gateway = clean_text(match.group(1).strip())
             else:
-                # Buscar en todo el texto, no solo etiquetado, usando palabras clave
                 gw_match = re.search(r'\b(GATEWAY|GATE)\s*[:|»]\s*([^\n\r]+)', text, re.IGNORECASE)
                 if gw_match:
-                    gateway = gw_match.group(2).strip()
-    # Limpieza final
+                    gateway = clean_text(gw_match.group(2).strip())
+    # Limpieza extra
     gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()
     gateway = re.sub(r'^#', '', gateway).strip()
     gateway = re.sub(r'\s*-\s*/ti', '', gateway, flags=re.IGNORECASE).strip()
-    if gateway.startswith('#'):
-        gateway = gateway[1:]
-    gateway = re.sub(r'\s+', ' ', gateway)  # unificar espacios
+    gateway = clean_text(gateway)
 
-    # STATUS - buscar etiqueta o si no, usar "Approved ✓"
+    # STATUS
     status = extract_field(r'STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭')
-    if status == "Not Found":
-        # Si el mensaje contiene "Approved", "Live", etc., ponerlo como status
+    if status == "Not Found" or status == "":
         if re.search(r'\b(APPROVED|LIVE|CHARGED|AUTH)\b', text_upper):
             status = "Approved ✓"
         else:
-            status = "Approved ✓"  # por defecto, ya que pasó el filtro
+            status = "Approved ✓"
+    else:
+        status = clean_text(status)
 
     # RESPONSE
     response = extract_field(r'RESPONSE|RESULT|MESSAGE|𝙍𝙚𝙨𝙪𝙡𝙩|𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲|𝐌𝐞𝐬𝐬𝐚𝐠𝐞')
-    response = re.sub(r'^\d+\s*:\s*', '', response).strip()
-    if response.upper() == "(ADDED) APPROVED":
-        response = "Approved"
+    if response != "Not Found":
+        response = re.sub(r'^\d+\s*:\s*', '', response).strip()
+        if response.upper() == "(ADDED) APPROVED":
+            response = "Approved"
+        response = clean_text(response)
 
     # BANK
     bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
+    bank = clean_text(bank)
 
     # COUNTRY
     country = extract_field(r'COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲')
     flag = "❓"
-    if country:
+    if country != "Not Found" and country:
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
         if flag_match:
             flag = flag_match.group(1)
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
+        country = clean_text(country)
 
     # BIN INFO (brand, type, level)
     bin_info = extract_field(r'BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
     brand = "Unknown"
     card_type = "Unknown"
     level = "Unknown"
-    if bin_info:
+    if bin_info != "Not Found" and bin_info:
         bin_info = re.sub(r'^\[\d{6}\]\s*', '', bin_info).strip()
         bin_info = re.sub(r'^\s*\(|\)\s*$', '', bin_info).strip()
         parts = [p.strip() for p in re.split(r'[-|]', bin_info) if p.strip()]
         if parts:
             if parts[0].upper() in ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER']:
-                brand = parts.pop(0)
+                brand = clean_text(parts.pop(0))
             if parts:
-                card_type = parts.pop(0)
+                card_type = clean_text(parts.pop(0))
             if parts:
-                level = parts.pop(0)
+                level = clean_text(parts.pop(0))
             if parts:
                 rest = ' '.join(parts)
-                if bank == "Not Found":
-                    bank = rest
-                if country == "Not Found" or not country:
-                    country = rest
+                if bank == "Not Found" or bank == "":
+                    bank = clean_text(rest)
+                if country == "Not Found" or country == "":
+                    country = clean_text(rest)
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', bin_info)
         if flag_match:
             flag = flag_match.group(1)
-
-    # Si el banco sigue sin encontrarse, pero hay un nombre en la primera línea (después de gateway)
-    if bank == "Not Found":
-        # Buscar "Bank: X" en el texto
-        bank_match = re.search(r'\bBANK\s*[:|]\s*([^\n\r]+)', text, re.IGNORECASE)
-        if bank_match:
-            bank = bank_match.group(1).strip()
-        else:
-            # Si no, asignar "Unknown"
-            bank = "Unknown"
 
     return {
         "card_info": card_info,
@@ -220,7 +205,6 @@ def extract_card_info(text: str) -> dict | None:
     }
 
 def generate_extrapolated(card_info: str) -> tuple:
-    """Genera tres tarjetas extrapoladas."""
     cc, month, year, cvv = card_info.split('|')
     cc1 = cc[:12] + 'xxxx'
     ext1 = f"{cc1}|{month}|{year}|rnd"
@@ -261,21 +245,21 @@ async def handler(event):
     try:
         bin_info_api = await get_bin_info(card_data['bin_number'])
         if bin_info_api.get('brand') and bin_info_api['brand'] != 'N/A':
-            card_data['brand'] = bin_info_api['brand']
+            card_data['brand'] = clean_text(bin_info_api['brand'])
         if bin_info_api.get('type') and bin_info_api['type'] != 'N/A':
-            card_data['type'] = bin_info_api['type']
+            card_data['type'] = clean_text(bin_info_api['type'])
         if bin_info_api.get('level') and bin_info_api['level'] != 'N/A':
-            card_data['level'] = bin_info_api['level']
+            card_data['level'] = clean_text(bin_info_api['level'])
         if bin_info_api.get('bank') and bin_info_api['bank'] != 'N/A':
-            card_data['bank'] = bin_info_api['bank']
+            card_data['bank'] = clean_text(bin_info_api['bank'])
         if bin_info_api.get('country_name') and bin_info_api['country_name'] != 'N/A':
-            card_data['country'] = bin_info_api['country_name']
+            card_data['country'] = clean_text(bin_info_api['country_name'])
         if bin_info_api.get('country_flag') and bin_info_api['country_flag'] != '❓':
             card_data['flag'] = bin_info_api['country_flag']
 
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
-        # ---------- NUEVA PLANTILLA DE MENSAJE ----------
+        # Plantilla exacta (con espacios y líneas como pediste)
         custom_message = f"""
 ✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
 
@@ -336,10 +320,8 @@ async def handler(event):
 async def main():
     print("Iniciando cliente de Telegram...")
     if SESSION_STRING:
-        # Con string session, ya está autenticado; start() sin argumentos
         await client.start()
     else:
-        # Con archivo, necesitas el número (solo la primera vez)
         await client.start(phone=PHONE_NUMBER)
     print("¡Bot en ejecución! Esperando mensajes...")
     await client.run_until_disconnected()
