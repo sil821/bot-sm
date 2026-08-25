@@ -20,6 +20,7 @@ SESSION_STRING = os.getenv("SESSION_STRING")
 if not all([API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING]):
     raise ValueError("Faltan variables de entorno: API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING")
 
+# Tus nuevas imágenes
 IMAGES_URL = [
     'https://i.pinimg.com/736x/38/5a/2f/385a2f9f39beb724959faa4c46a0ebbf.jpg',
     'https://i.pinimg.com/736x/4d/34/a4/4d34a4c55bdc990cb93be3197ed59d05.jpg',
@@ -32,7 +33,6 @@ bot = telebot.TeleBot(BOT_TOKEN)
 processed_cards = set()
 cards_in_progress = set()
 
-# Cliente con StringSession
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 # ------------------- FUNCIONES AUXILIARES -------------------
@@ -60,6 +60,7 @@ def extract_card_info(text: str) -> dict | None:
     print(text[:500] + "..." if len(text) > 500 else text)
     print("---")
 
+    # ---------- PATRONES CC ----------
     card_patterns = [
         r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
         r'(\d{14,16}):(\d{1,2}):(\d{2,4}):(\d{3,4})',
@@ -81,6 +82,7 @@ def extract_card_info(text: str) -> dict | None:
     card_info = f"{cc}|{month}|{year}|{cvv}"
     bin_num = cc[:6]
 
+    # ---------- FILTRADO DE APROBACIÓN ----------
     success_keywords = r'(?:APPROVED|APROBADA|LIVE|CHARGED|CHARGE|AUTH|AUTHORIZED)'
     reject_keywords = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED|EXPIRED'
 
@@ -94,65 +96,100 @@ def extract_card_info(text: str) -> dict | None:
         print("Se encontró indicador de rechazo. Ignorando.")
         return None
 
-    def extract_field(keywords, default="Not Found"):
-        pattern = r'.*?(?:' + keywords + r')\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]*)'
+    # ---------- EXTRACCIÓN DE GATEWAY (MEJORADA) ----------
+    gateway = "Not Found"
+    
+    # 1. Buscar en campos etiquetados (Gateway:, Gate:, Pasarela:, etc.)
+    gateway_patterns = [
+        r'(?:GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)',
+        r'(?:STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY)\s*[:|»-]\s*([^\n\r]+)',
+        r'#([A-Za-z0-9_]+)',  # #Stripe, #Braintree
+    ]
+    for pattern in gateway_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return clean_text(match.group(1).strip())
-        return default
+            gateway = clean_text(match.group(1).strip())
+            break
 
-    gateway = extract_field(r'GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲')
+    # 2. Si no se encontró, buscar en la primera línea (ej: "ϯ EAGLE 🦅 / Braintree")
     if gateway == "Not Found":
         first_line = text.split('\n')[0].strip()
-        gateway_candidates = re.findall(r'\b(BRAINTREE|STRIPE|PAYFLOW|AUTH|EAGLE|CHECKER|CHK|GATEWAY)\b', first_line, re.IGNORECASE)
-        if gateway_candidates:
-            gateway = ' '.join(gateway_candidates).strip()
+        
+        # Buscar palabras clave de gateway en la primera línea
+        gateway_keywords = re.findall(r'\b(BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK)\b', first_line, re.IGNORECASE)
+        if gateway_keywords:
+            gateway = ' '.join(gateway_keywords).strip()
         else:
+            # Intentar capturar después de un separador / o -
             match = re.search(r'[/\-]\s*([a-zA-Z0-9\s]+)', first_line)
             if match:
                 gateway = clean_text(match.group(1).strip())
             else:
-                gw_match = re.search(r'\b(GATEWAY|GATE)\s*[:|»]\s*([^\n\r]+)', text, re.IGNORECASE)
+                # Buscar en todo el texto con palabras clave sueltas
+                gw_match = re.search(r'\b(STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH)\b', text, re.IGNORECASE)
                 if gw_match:
-                    gateway = clean_text(gw_match.group(2).strip())
-    gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()
-    gateway = re.sub(r'^#', '', gateway).strip()
-    gateway = re.sub(r'\s*-\s*/ti', '', gateway, flags=re.IGNORECASE).strip()
-    gateway = clean_text(gateway)
+                    gateway = clean_text(gw_match.group(1).strip())
 
-    status = extract_field(r'STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭')
-    if status == "Not Found" or status == "":
+    # 3. Limpieza final del gateway
+    if gateway != "Not Found":
+        gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()      # eliminar (texto)
+        gateway = re.sub(r'^#', '', gateway).strip()              # eliminar # inicial
+        gateway = re.sub(r'\s*-\s*/ti', '', gateway, flags=re.IGNORECASE).strip()
+        gateway = re.sub(r'\s*V\d+$', '', gateway, flags=re.IGNORECASE).strip()  # eliminar V2, V3
+        gateway = clean_text(gateway)
+        
+        # Si el gateway tiene más de 30 caracteres, probablemente es basura, intentar extraer solo la palabra clave
+        if len(gateway) > 30:
+            gw_match = re.search(r'\b(STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY)\b', gateway, re.IGNORECASE)
+            if gw_match:
+                gateway = gw_match.group(1).strip()
+
+    print(f"Gateway detectado: {gateway}")
+
+    # ---------- EXTRACCIÓN DE STATUS ----------
+    status = "Approved ✓"
+    status_match = re.search(r'(?:STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)', text, re.IGNORECASE)
+    if status_match:
+        status = clean_text(status_match.group(1).strip())
+    else:
+        # Si no hay etiqueta, buscar palabras de éxito
         if re.search(r'\b(APPROVED|LIVE|CHARGED|AUTH)\b', text_upper):
             status = "Approved ✓"
-        else:
-            status = "Approved ✓"
-    else:
-        status = clean_text(status)
 
-    response = extract_field(r'RESPONSE|RESULT|MESSAGE|𝙍𝙚𝙨𝙪𝙡𝙩|𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲|𝐌𝐞𝐬𝐬𝐚𝐠𝐞')
-    if response != "Not Found":
+    # ---------- EXTRACCIÓN DE RESPONSE ----------
+    response = "Not Found"
+    response_match = re.search(r'(?:RESPONSE|RESULT|MESSAGE|𝙍𝙚𝙨𝙪𝙡𝙩|𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲|𝐌𝐞𝐬𝐬𝐚𝐠𝐞)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)', text, re.IGNORECASE)
+    if response_match:
+        response = clean_text(response_match.group(1).strip())
         response = re.sub(r'^\d+\s*:\s*', '', response).strip()
         if response.upper() == "(ADDED) APPROVED":
             response = "Approved"
-        response = clean_text(response)
 
-    bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
-    bank = clean_text(bank)
+    # ---------- EXTRACCIÓN DE BANK ----------
+    bank = "Not Found"
+    bank_match = re.search(r'(?:BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)', text, re.IGNORECASE)
+    if bank_match:
+        bank = clean_text(bank_match.group(1).strip())
 
-    country = extract_field(r'COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲')
+    # ---------- EXTRACCIÓN DE COUNTRY ----------
+    country = "Not Found"
     flag = "❓"
-    if country != "Not Found" and country:
+    country_match = re.search(r'(?:COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)', text, re.IGNORECASE)
+    if country_match:
+        country = clean_text(country_match.group(1).strip())
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
         if flag_match:
             flag = flag_match.group(1)
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
-        country = clean_text(country)
 
-    bin_info = extract_field(r'BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
+    # ---------- EXTRACCIÓN DE BIN INFO ----------
+    bin_info_match = re.search(r'(?:BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)', text, re.IGNORECASE)
+    bin_info = bin_info_match.group(1).strip() if bin_info_match else ""
     brand = "Unknown"
     card_type = "Unknown"
     level = "Unknown"
-    if bin_info != "Not Found" and bin_info:
+    
+    if bin_info:
         bin_info = re.sub(r'^\[\d{6}\]\s*', '', bin_info).strip()
         bin_info = re.sub(r'^\s*\(|\)\s*$', '', bin_info).strip()
         parts = [p.strip() for p in re.split(r'[-|]', bin_info) if p.strip()]
