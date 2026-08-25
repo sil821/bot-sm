@@ -2,3 +2,4 @@ telethon==1.34.0
 pyrogram==2.0.106
 pyTelegramBotAPI==4.15.0
 aiohttp==3.8.5
+tgcrypto==1.2.5
