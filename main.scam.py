@@ -21,11 +21,11 @@ if not all([API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING]):
     raise ValueError("Faltan variables de entorno: API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING")
 
 IMAGES_URL = [
-    'https://i.pinimg.com/736x/78/39/79/7839791ce7428f1cacae903e034bffc0.jpg',
-    'https://i.pinimg.com/736x/8f/dc/d8/8fdcd87fccba7f4a969b33b04823560d.jpg',
-    'https://i.pinimg.com/736x/c6/77/33/c6773365ea8c89a1670f14739f1af1b1.jpg',
-    'https://i.pinimg.com/736x/1c/42/6e/1c426e05aedbf7aa8a685df6f9b6f7f6.jpg',
-    'https://i.pinimg.com/736x/74/40/b7/7440b7d0bbb8b2500cb6969d138a7f6a.jpg',
+    'https://i.pinimg.com/736x/38/5a/2f/385a2f9f39beb724959faa4c46a0ebbf.jpg',
+    'https://i.pinimg.com/736x/4d/34/a4/4d34a4c55bdc990cb93be3197ed59d05.jpg',
+    'https://i.pinimg.com/736x/b7/14/f0/b714f0ba6f3c087c5a1a3073d8f62f45.jpg',
+    'https://i.pinimg.com/736x/eb/e7/01/ebe70174388848d7f0f6eb458624a660.jpg',
+    'https://i.pinimg.com/736x/59/c5/9f/59c59f3baf4f0a66709d66556612aeea.jpg',
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
