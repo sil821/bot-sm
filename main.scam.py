@@ -48,11 +48,51 @@ async def get_bin_info(bin_number: str) -> dict:
             "bank": "N/A", "country_name": "N/A", "country_flag": "❓"}
 
 def clean_text(text: str) -> str:
+    """Limpia caracteres molestos pero NO elimina separadores ni información."""
     if not text or text == "Not Found":
         return text
+    # Eliminar *, ", ', `, pero mantener |, -, /, etc.
     cleaned = re.sub(r'[\*\`"\']', '', text)
+    # Reemplazar múltiples espacios por uno solo
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
+
+def extract_gateway(text: str) -> str:
+    """
+    Extrae el gateway de forma más inteligente, manteniendo el formato completo.
+    """
+    # 1. Buscar campos etiquetados con Gateway:, Gate:, Pasarela:, etc.
+    #    Capturar TODO lo que sigue hasta el final de la línea (sin limitar a una palabra)
+    gateway_patterns = [
+        r'(?:GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)',
+        r'#([A-Za-z0-9_]+(?:\s*[|]\s*[A-Za-z0-9_]+)?)',  # #Stripe | Auth
+        r'(?:STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY)\s*[:|»-]\s*([^\n\r]+)',
+    ]
+    for pattern in gateway_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            gateway = match.group(1).strip()
+            # Limpiar solo caracteres molestos, sin tocar separadores
+            return clean_text(gateway)
+
+    # 2. Si no hay campo etiquetado, buscar en la primera línea
+    first_line = text.split('\n')[0].strip()
+    # Buscar patrones como "EAGLE / Braintree" o "Stripe | Auth"
+    match = re.search(r'([A-Za-z0-9\s]+)\s*[/|»-]\s*([A-Za-z0-9\s]+)', first_line)
+    if match:
+        gateway = f"{match.group(1).strip()} | {match.group(2).strip()}"
+        return clean_text(gateway)
+
+    # 3. Buscar palabras clave sueltas en todo el texto y unirlas
+    keywords = re.findall(r'\b(BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK)\b', text, re.IGNORECASE)
+    if keywords:
+        # Eliminar duplicados manteniendo orden
+        seen = set()
+        unique_keywords = [kw for kw in keywords if not (kw in seen or seen.add(kw))]
+        gateway = ' | '.join(unique_keywords)
+        return clean_text(gateway)
+
+    return "Not Found"
 
 def extract_card_info(text: str) -> dict | None:
     text_upper = text.upper()
@@ -97,53 +137,7 @@ def extract_card_info(text: str) -> dict | None:
         return None
 
     # ---------- EXTRACCIÓN DE GATEWAY (MEJORADA) ----------
-    gateway = "Not Found"
-    
-    # 1. Buscar en campos etiquetados (Gateway:, Gate:, Pasarela:, etc.)
-    gateway_patterns = [
-        r'(?:GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲)\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]+)',
-        r'(?:STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY)\s*[:|»-]\s*([^\n\r]+)',
-        r'#([A-Za-z0-9_]+)',  # #Stripe, #Braintree
-    ]
-    for pattern in gateway_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            gateway = clean_text(match.group(1).strip())
-            break
-
-    # 2. Si no se encontró, buscar en la primera línea (ej: "ϯ EAGLE 🦅 / Braintree")
-    if gateway == "Not Found":
-        first_line = text.split('\n')[0].strip()
-        
-        # Buscar palabras clave de gateway en la primera línea
-        gateway_keywords = re.findall(r'\b(BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK)\b', first_line, re.IGNORECASE)
-        if gateway_keywords:
-            gateway = ' '.join(gateway_keywords).strip()
-        else:
-            # Intentar capturar después de un separador / o -
-            match = re.search(r'[/\-]\s*([a-zA-Z0-9\s]+)', first_line)
-            if match:
-                gateway = clean_text(match.group(1).strip())
-            else:
-                # Buscar en todo el texto con palabras clave sueltas
-                gw_match = re.search(r'\b(STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH)\b', text, re.IGNORECASE)
-                if gw_match:
-                    gateway = clean_text(gw_match.group(1).strip())
-
-    # 3. Limpieza final del gateway
-    if gateway != "Not Found":
-        gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()      # eliminar (texto)
-        gateway = re.sub(r'^#', '', gateway).strip()              # eliminar # inicial
-        gateway = re.sub(r'\s*-\s*/ti', '', gateway, flags=re.IGNORECASE).strip()
-        gateway = re.sub(r'\s*V\d+$', '', gateway, flags=re.IGNORECASE).strip()  # eliminar V2, V3
-        gateway = clean_text(gateway)
-        
-        # Si el gateway tiene más de 30 caracteres, probablemente es basura, intentar extraer solo la palabra clave
-        if len(gateway) > 30:
-            gw_match = re.search(r'\b(STRIPE|BRAINTREE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY)\b', gateway, re.IGNORECASE)
-            if gw_match:
-                gateway = gw_match.group(1).strip()
-
+    gateway = extract_gateway(text)
     print(f"Gateway detectado: {gateway}")
 
     # ---------- EXTRACCIÓN DE STATUS ----------
@@ -152,7 +146,6 @@ def extract_card_info(text: str) -> dict | None:
     if status_match:
         status = clean_text(status_match.group(1).strip())
     else:
-        # Si no hay etiqueta, buscar palabras de éxito
         if re.search(r'\b(APPROVED|LIVE|CHARGED|AUTH)\b', text_upper):
             status = "Approved ✓"
 
