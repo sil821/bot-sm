@@ -11,33 +11,29 @@ from telethon.tl.types import Message
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # ------------------- CONFIGURACIÓN DESDE VARIABLES DE ENTORNO -------------------
-API_ID = int(os.getenv("API_ID", "30861149"))
-API_HASH = os.getenv("API_HASH", "8e41ffe6c0d5b5609bc5129628d1f3e4")
-PHONE_NUMBER = os.getenv("PHONE_NUMBER", "+584123889230")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8545721791:AAHAk78dr1-jMDR6M-Un_vjVPwmUxYTTl-A")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1003363707812"))
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+SESSION_STRING = os.getenv("SESSION_STRING")
 
-# --- Session String (recomendado para Railway) ---
-SESSION_STRING = os.getenv("SESSION_STRING", None)
-SESSION_NAME = "scam_session" if not SESSION_STRING else None
+if not all([API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING]):
+    raise ValueError("Faltan variables de entorno: API_ID, API_HASH, BOT_TOKEN, CHANNEL_ID, SESSION_STRING")
 
 IMAGES_URL = [
-    'https://i.pinimg.com/736x/20/af/cf/20afcf4beeb219fb55e90ca19a8131c9.jpg',
-    'https://i.pinimg.com/736x/0b/41/fd/0b41fdc1fac4dc91e4531c20e1046213.jpg',
-    'https://i.pinimg.com/736x/7a/cd/cd/7acdcd93235fdf7f3fdc2263d203e921.jpg',
-    'https://i.pinimg.com/736x/d2/fa/9b/d2fa9b36007562e3a3954810cc73dac4.jpg',
-    'https://i.pinimg.com/736x/cc/b0/ae/ccb0aec3b037cd980f5947c2077a4647.jpg',
+    'https://i.pinimg.com/736x/78/39/79/7839791ce7428f1cacae903e034bffc0.jpg',
+    'https://i.pinimg.com/736x/8f/dc/d8/8fdcd87fccba7f4a969b33b04823560d.jpg',
+    'https://i.pinimg.com/736x/c6/77/33/c6773365ea8c89a1670f14739f1af1b1.jpg',
+    'https://i.pinimg.com/736x/1c/42/6e/1c426e05aedbf7aa8a685df6f9b6f7f6.jpg',
+    'https://i.pinimg.com/736x/74/40/b7/7440b7d0bbb8b2500cb6969d138a7f6a.jpg',
 ]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 processed_cards = set()
 cards_in_progress = set()
 
-# ------------------- CLIENTE DE TELEGRAM -------------------
-if SESSION_STRING:
-    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-else:
-    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+# Cliente con StringSession
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 # ------------------- FUNCIONES AUXILIARES -------------------
 async def get_bin_info(bin_number: str) -> dict:
@@ -52,10 +48,8 @@ async def get_bin_info(bin_number: str) -> dict:
             "bank": "N/A", "country_name": "N/A", "country_flag": "❓"}
 
 def clean_text(text: str) -> str:
-    """Limpia caracteres no deseados como **, `, comillas, etc."""
     if not text or text == "Not Found":
         return text
-    # Elimina **, __, `, comillas dobles/simples, y espacios extra
     cleaned = re.sub(r'[\*\`"\']', '', text)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
@@ -66,7 +60,6 @@ def extract_card_info(text: str) -> dict | None:
     print(text[:500] + "..." if len(text) > 500 else text)
     print("---")
 
-    # ---------- PATRONES CC ----------
     card_patterns = [
         r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
         r'(\d{14,16}):(\d{1,2}):(\d{2,4}):(\d{3,4})',
@@ -88,7 +81,6 @@ def extract_card_info(text: str) -> dict | None:
     card_info = f"{cc}|{month}|{year}|{cvv}"
     bin_num = cc[:6]
 
-    # ---------- FILTRADO DE APROBACIÓN ----------
     success_keywords = r'(?:APPROVED|APROBADA|LIVE|CHARGED|CHARGE|AUTH|AUTHORIZED)'
     reject_keywords = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED|EXPIRED'
 
@@ -102,7 +94,6 @@ def extract_card_info(text: str) -> dict | None:
         print("Se encontró indicador de rechazo. Ignorando.")
         return None
 
-    # ---------- EXTRACCIÓN DE CAMPOS ----------
     def extract_field(keywords, default="Not Found"):
         pattern = r'.*?(?:' + keywords + r')\s*[:≠⇾↳ϟ༄➸⌁┊»-]\s*([^\n\r]*)'
         match = re.search(pattern, text, re.IGNORECASE)
@@ -110,7 +101,6 @@ def extract_card_info(text: str) -> dict | None:
             return clean_text(match.group(1).strip())
         return default
 
-    # GATEWAY
     gateway = extract_field(r'GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲')
     if gateway == "Not Found":
         first_line = text.split('\n')[0].strip()
@@ -125,13 +115,11 @@ def extract_card_info(text: str) -> dict | None:
                 gw_match = re.search(r'\b(GATEWAY|GATE)\s*[:|»]\s*([^\n\r]+)', text, re.IGNORECASE)
                 if gw_match:
                     gateway = clean_text(gw_match.group(2).strip())
-    # Limpieza extra
     gateway = re.sub(r'\s*\(.*?\)', '', gateway).strip()
     gateway = re.sub(r'^#', '', gateway).strip()
     gateway = re.sub(r'\s*-\s*/ti', '', gateway, flags=re.IGNORECASE).strip()
     gateway = clean_text(gateway)
 
-    # STATUS
     status = extract_field(r'STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭')
     if status == "Not Found" or status == "":
         if re.search(r'\b(APPROVED|LIVE|CHARGED|AUTH)\b', text_upper):
@@ -141,7 +129,6 @@ def extract_card_info(text: str) -> dict | None:
     else:
         status = clean_text(status)
 
-    # RESPONSE
     response = extract_field(r'RESPONSE|RESULT|MESSAGE|𝙍𝙚𝙨𝙪𝙡𝙩|𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲|𝐌𝐞𝐬𝐬𝐚𝐠𝐞')
     if response != "Not Found":
         response = re.sub(r'^\d+\s*:\s*', '', response).strip()
@@ -149,11 +136,9 @@ def extract_card_info(text: str) -> dict | None:
             response = "Approved"
         response = clean_text(response)
 
-    # BANK
     bank = extract_field(r'BANK|ISSUING BANK|BANCO|𝘽𝗮𝗻𝗸|𝗜𝘀𝘀𝘂𝗲𝗿|𝐁𝐚𝐧𝐤')
     bank = clean_text(bank)
 
-    # COUNTRY
     country = extract_field(r'COUNTRY|PAIS|𝘾𝙤𝙪𝙣𝙩𝙧𝙮|𝗖𝗼𝘂𝗻𝘁𝗿𝘆|𝐂𝐨𝐮𝐧𝐭𝐫𝐲')
     flag = "❓"
     if country != "Not Found" and country:
@@ -163,7 +148,6 @@ def extract_card_info(text: str) -> dict | None:
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
         country = clean_text(country)
 
-    # BIN INFO (brand, type, level)
     bin_info = extract_field(r'BIN|𝘽𝗶𝗻|INFO|DATA|INFORMACION|𝗕𝗶𝗻|𝗧𝘆𝗽𝗲|𝐁𝐢𝐧 𝐈𝐧𝐟𝐨')
     brand = "Unknown"
     card_type = "Unknown"
@@ -259,7 +243,6 @@ async def handler(event):
 
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
-        # Plantilla exacta (con espacios y líneas como pediste)
         custom_message = f"""
 ✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
 
@@ -318,11 +301,8 @@ async def handler(event):
 
 # ------------------- ARRANQUE -------------------
 async def main():
-    print("Iniciando cliente de Telegram...")
-    if SESSION_STRING:
-        await client.start()
-    else:
-        await client.start(phone=PHONE_NUMBER)
+    print("Iniciando cliente de Telegram con StringSession...")
+    await client.start()
     print("¡Bot en ejecución! Esperando mensajes...")
     await client.run_until_disconnected()
 
