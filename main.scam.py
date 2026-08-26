@@ -66,18 +66,13 @@ def extract_card_info(text: str) -> dict | None:
     print(text[:500] + "..." if len(text) > 500 else text)
     print("="*60)
     
-    # ---------- EXTRAER TARJETA (ULTRA FLEXIBLE) ----------
-    # Primero, eliminar spoilers
+    # ---------- EXTRAER TARJETA ----------
     text_clean = re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
     
     card_patterns = [
-        # Formato: 4347696946412318|02|2031|457
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        # Formato: Card ↠ 4347696946412318|02|2031|457
         r'(?:CC|CARD)\s*[↠»➸:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        # Formato: 4347696946412318-02-2031-457
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
-        # Formato: 4347696946412318/02/2031/457
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
     
@@ -85,11 +80,11 @@ def extract_card_info(text: str) -> dict | None:
     for pattern in card_patterns:
         match_cc = re.search(pattern, text_clean, re.IGNORECASE)
         if match_cc:
-            print(f"✅ CC ENCONTRADO con patrón: {pattern}")
+            print(f"✅ CC ENCONTRADO")
             break
     
     if not match_cc:
-        print("❌ No se encontró tarjeta en el mensaje")
+        print("❌ No se encontró tarjeta")
         return None
     
     cc, month, year, cvv = match_cc.groups()
@@ -97,61 +92,81 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
     print(f"💳 Tarjeta: {card_info}")
 
-    # ---------- NORMALIZAR TEXTO PARA FILTRADO ----------
+    # ---------- NORMALIZAR TEXTO ----------
     text_norm = normalize_text(text_clean)
-    print(f"📝 Texto normalizado: {text_norm[:200]}...")
 
-    # ---------- FILTRADO DE APROBACIÓN (MUY FLEXIBLE) ----------
-    # Palabras de éxito (ampliadas)
-    success_words = [
-        'APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 
-        'AUTH', 'AUTHORIZED', 'ADDED', 'SUCCESSFUL', 'EXITOSA',
-        'COMPLETED', 'ACCEPTED', 'CCN LIVE', 'CARD LIVE', 'CVV LIVE',
-        'APPROVE', 'APROBADO', 'EXITOSO', 'OK', 'VALID', 'ACTIVE'
-    ]
+    # ---------- EXTRACCIÓN DE STATUS Y RESULT POR SEPARADO ----------
+    # Extraer Status (esto es lo que decide si es aprobado o no)
+    status_field = extract_field(text_clean, ['STATUS', 'ESTADO', 'STAT', 'ESTATUS'])
     
-    # Palabras de rechazo
-    reject_words = [
-        'DEAD', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT',
-        'TIMEOUT', 'DECLINED', 'EXPIRED', 'FAILED', 'INSUFFICIENT',
-        'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED'
-    ]
+    # Extraer Result/Response (esto es lo que va en el campo RESPONSE del mensaje final)
+    result_field = extract_field(text_clean, ['RESULT', 'RESPONSE', 'MESSAGE', 'MSG', 'REPLY'])
     
-    has_success = any(word in text_norm for word in success_words)
-    has_reject = any(word in text_norm for word in reject_words)
+    # Si no se encontró Result, buscar específicamente "Result ↠"
+    if result_field == "Not Found":
+        result_match = re.search(r'Result\s*[↠»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
+        if result_match:
+            result_field = clean_text(result_match.group(1).strip())
     
-    print(f"🔍 Tiene éxito: {has_success}")
-    print(f"🔍 Tiene rechazo: {has_reject}")
+    print(f"📊 Status extraído: {status_field}")
+    print(f"📝 Result extraído: {result_field}")
+
+    # ---------- FILTRADO DE APROBACIÓN (SOLO POR STATUS) ----------
+    # Palabras de éxito para el Status
+    success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 
+                     'AUTH', 'AUTHORIZED', 'ADDED', 'SUCCESSFUL', 'EXITOSA',
+                     'COMPLETED', 'ACCEPTED', 'OK', 'VALID', 'ACTIVE']
     
-    # Si hay rechazo, ignorar (incluso si tiene éxito)
+    # Palabras de rechazo - SOLO para el Status
+    reject_words = ['DEAD', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT', 
+                    'TIMEOUT', 'DECLINED', 'EXPIRED', 'FAILED', 'INSUFFICIENT',
+                    'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED']
+    
+    # Verificar si el Status tiene éxito o rechazo
+    has_success = False
+    has_reject = False
+    
+    if status_field != "Not Found":
+        status_upper = status_field.upper()
+        has_success = any(word in status_upper for word in success_words)
+        has_reject = any(word in status_upper for word in reject_words)
+    
+    # Si no se encontró campo Status, buscar en todo el texto (pero con cuidado)
+    if status_field == "Not Found":
+        has_success = any(word in text_norm for word in success_words)
+        # NO buscar reject en todo el texto porque podría estar en Result
+    
+    print(f"🔍 Status tiene éxito: {has_success}")
+    print(f"🔍 Status tiene rechazo: {has_reject}")
+    
+    # Si el Status tiene rechazo, ignorar el mensaje
     if has_reject:
-        print("❌ Mensaje rechazado (contiene palabra de rechazo)")
+        print("❌ Mensaje RECHAZADO (Status contiene rechazo)")
         return None
     
-    # Si NO tiene éxito, pero tiene "LIVE" o "APPROVED" en el texto original (no normalizado)
+    # Si NO tiene éxito, ignorar
     if not has_success:
-        # Buscar en el texto original sin normalizar
-        text_orig_upper = text_clean.upper()
-        has_success = any(word in text_orig_upper for word in success_words)
-        if not has_success:
-            print("❌ Mensaje ignorado (no tiene palabras de éxito)")
-            return None
+        print("❌ Mensaje IGNORADO (Status no tiene éxito)")
+        return None
     
-    print("✅ APROBADO/LIVE DETECTADO!")
+    print("✅ MENSAJE APROBADO!")
 
-    # ---------- EXTRACCIÓN DE STATUS ----------
-    status = "Approved ✓"
-    if 'LIVE' in text_norm:
-        status = "Live ✓"
-    elif 'APPROVED' in text_norm or 'APROBADA' in text_norm:
-        status = "Approved ✓"
-    
-    # Intentar extraer status de campo etiquetado
-    status_field = extract_field(text_clean, ['STATUS', 'RESULT', 'ESTADO', 'STAT', 'ESTATUS'])
+    # ---------- ASIGNAR STATUS FINAL ----------
     if status_field != "Not Found":
         status = status_field
+    elif 'LIVE' in text_norm:
+        status = "Live ✓"
+    else:
+        status = "Approved ✓"
     
-    print(f"📊 Status: {status}")
+    print(f"📊 Status final: {status}")
+
+    # ---------- ASIGNAR RESPONSE (RESULT) ----------
+    response = result_field if result_field != "Not Found" else "Not Found"
+    if response != "Not Found":
+        response = re.sub(r'^\d+\s*[:|»➸]\s*', '', response).strip()
+    
+    print(f"📝 Response final: {response}")
 
     # ---------- EXTRACCIÓN DE GATEWAY ----------
     gateway = "Not Found"
@@ -159,7 +174,6 @@ def extract_card_info(text: str) -> dict | None:
     if gateway_field != "Not Found":
         gateway = gateway_field
     else:
-        # Buscar palabras clave de gateway
         gw_keywords = ['BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
                       'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
                       'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL']
@@ -169,30 +183,12 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"🚪 Gateway: {gateway}")
 
-    # ---------- EXTRACCIÓN DE RESPONSE ----------
-    response = "Not Found"
-    response_field = extract_field(text_clean, ['RESPONSE', 'RESULT', 'MESSAGE', 'MSG', 'REPLY'])
-    if response_field != "Not Found":
-        response = response_field
-    else:
-        # Buscar específicamente "Result ↠ ..."
-        result_match = re.search(r'Result\s*[↠»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if result_match:
-            response = clean_text(result_match.group(1).strip())
-    
-    # Limpiar response
-    if response != "Not Found":
-        response = re.sub(r'^\d+\s*[:|»➸]\s*', '', response).strip()
-    
-    print(f"📝 Response: {response}")
-
     # ---------- EXTRACCIÓN DE BANK ----------
     bank = "Not Found"
     bank_field = extract_field(text_clean, ['BANK', 'BANCO', 'ISSUER'])
     if bank_field != "Not Found":
         bank = bank_field
     else:
-        # Buscar en "Bin Info"
         bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if bin_section:
             bin_text = bin_section.group(1).strip()
@@ -213,7 +209,6 @@ def extract_card_info(text: str) -> dict | None:
             flag = flag_match.group(1)
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
     else:
-        # Buscar en Bin Info
         bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if bin_section:
             bin_text = bin_section.group(1).strip()
@@ -232,7 +227,6 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    # Buscar en Bin Info
     bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
     if bin_section:
         bin_text = bin_section.group(1).strip()
@@ -241,7 +235,6 @@ def extract_card_info(text: str) -> dict | None:
         if brand_match:
             brand = clean_text(brand_match.group(1).strip())
         else:
-            # Buscar palabras clave
             for kw in ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER']:
                 if kw in bin_text.upper():
                     brand = kw
@@ -322,7 +315,6 @@ async def handler(event):
     print(f"🔄 Procesando tarjeta: {card_clean}")
 
     try:
-        # Obtener información del BIN
         bin_info = await get_bin_info(card_data['bin_number'])
         if bin_info.get('brand') and bin_info['brand'] != 'N/A':
             card_data['brand'] = clean_text(bin_info['brand'])
