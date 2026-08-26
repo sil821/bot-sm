@@ -34,6 +34,20 @@ processed_cards = set()
 cards_in_progress = set()
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
+# ------------------- LISTA DE GATEWAYS -------------------
+VALID_GATEWAYS = [
+    'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
+    'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
+    'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
+    'AUTHORIZE', 'AUTHORIZED', 'STRIPE V2', 'STRIPE V3',
+    'BRAINTREE AUTH', 'SHOPIFY PAYMENTS', 'ATREUS', '2CHECKOUT',
+    'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER', 'WEBMONEY',
+    'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY', 'REALEX',
+    'NMI', 'AUTHORIZE.NET', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
+    'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'CHECKOUT.COM', 'BAMBORA',
+    'PAYMENT GATEWAY', 'PROCESSOR', 'GATE', 'PASARELA', 'GW'
+]
+
 # ------------------- FUNCIONES AUXILIARES -------------------
 def normalize_text(text: str) -> str:
     """Convierte caracteres UNICODE a ASCII normal y sube a mayúsculas"""
@@ -47,7 +61,7 @@ def clean_text(text: str) -> str:
     if not text or text == "Not Found":
         return text
     cleaned = re.sub(r'[\*\`"\']', '', text)
-    cleaned = re.sub(r'[⚡💳✅✓]', '', cleaned)
+    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
@@ -61,62 +75,114 @@ def extract_field(text: str, field_names: list, default="Not Found") -> str:
     return default
 
 def extract_gateway(text: str, text_norm: str) -> str:
-    """
-    Extrae el gateway de forma inteligente.
-    SOLO acepta palabras conocidas, NUNCA números.
-    """
-    # Lista de gateways válidos (SOLO letras)
-    VALID_GATEWAYS = [
-        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
-        'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
-        'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
-        'AUTHORIZE', 'AUTHORIZED', 'STRIPE V2', 'STRIPE V3',
-        'BRAINTREE AUTH', 'SHOPIFY PAYMENTS'
+    """Extrae el gateway de forma inteligente. NUNCA números."""
+    gateway_patterns = [
+        r'(?:GATEWAY|GATE|GATΕ|PASARELA|GW)\s*[-»:]\s*([^\n\r]+)',
+        r'⚜️\s*𝑮𝑨𝑻𝑬\s*[-»:]\s*([^\n\r]+)',
+        r'⚜️\s*GATE\s*[-»:]\s*([^\n\r]+)',
+        r'⚜️\s*GATΕ\s*[-»:]\s*([^\n\r]+)',
     ]
     
-    # 1. Buscar campo etiquetado
-    gateway_field = extract_field(text, ['GATEWAY', 'GATE', 'PASARELA', 'GW'])
-    if gateway_field != "Not Found":
-        # Limpiar y verificar que NO sea un número
-        cleaned = clean_text(gateway_field)
-        # Si tiene números de tarjeta (14-16 dígitos), ignorar
-        if re.search(r'\d{14,16}', cleaned):
-            print(f"⚠️ Gateway ignorado (parece número de tarjeta): {cleaned}")
-        # Si tiene #BIN seguido de números, ignorar
-        elif re.search(r'#\d{6}', cleaned):
-            print(f"⚠️ Gateway ignorado (parece BIN): {cleaned}")
-        # Si tiene solo números (o principalmente números), ignorar
-        elif re.search(r'^\d+$', cleaned.replace(' ', '')):
-            print(f"⚠️ Gateway ignorado (solo números): {cleaned}")
-        else:
-            # Verificar que contenga al menos una palabra válida
+    for pattern in gateway_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            gateway_candidate = clean_text(match.group(1).strip())
+            if re.search(r'\d{14,16}', gateway_candidate):
+                continue
+            if re.search(r'#\d{6}', gateway_candidate):
+                continue
+            if re.search(r'^\d+$', gateway_candidate.replace(' ', '')):
+                continue
             for gw in VALID_GATEWAYS:
-                if gw in cleaned.upper():
-                    return cleaned
-            # Si no contiene ninguna palabra válida, pero es texto, devolverlo
-            # (puede ser un gateway no listado)
-            if len(cleaned) > 1 and not re.search(r'^\d+$', cleaned.replace(' ', '')):
-                return cleaned
+                if gw in gateway_candidate.upper():
+                    return gateway_candidate
+            if len(gateway_candidate) < 20 and not re.search(r'\d', gateway_candidate):
+                return gateway_candidate
     
-    # 2. Buscar palabras clave en el texto normalizado
     found = []
     for gw in VALID_GATEWAYS:
         if gw in text_norm:
             found.append(gw)
     
     if found:
-        # Eliminar duplicados manteniendo orden
         seen = set()
         unique = [gw for gw in found if not (gw in seen or seen.add(gw))]
         return ' | '.join(unique)
     
-    # 3. Buscar en campos de "Bin Info" o similar
-    bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text, re.IGNORECASE)
-    if bin_section:
-        bin_text = bin_section.group(1).strip()
-        for gw in VALID_GATEWAYS:
-            if gw in bin_text.upper():
-                return gw
+    return "Not Found"
+
+def extract_response(text: str) -> str:
+    """
+    Extrae el Response de forma ULTRA FLEXIBLE.
+    Captura TODO: Response, Result, Message, AVS, CVV, Status, Reason, etc.
+    """
+    # 1. Buscar campos etiquetados con nombres comunes de respuesta
+    response_names = [
+        'RESPONSE', 'RESULT', 'MESSAGE', 'MSG', 'REPLY',
+        'PRICE', 'AMOUNT', 'MONTO', 'TOTAL', 'CHARGE', 'CHARGED',
+        'COST', 'VALUE', 'IMPORTE', 'PRECIO',
+        'AVS', 'CVV', 'CVV2', 'CVC',
+        'STATUS MESSAGE', 'REASON', 'DETAIL', 'INFO', 'RESULTADO',
+        'RESPUESTA', 'MENSAJE', 'DETALLE', 'MOTIVO', 'ESTADO',
+        'PAYMENT STATUS', 'TRANSACTION STATUS', 'AUTH CODE',
+        'AUTHORIZATION CODE', 'RESPONSE CODE', 'RESPONSE TEXT'
+    ]
+    
+    # Buscar con separadores comunes
+    separators = r'[:|»➸↠\-–—]'
+    for name in response_names:
+        pattern = rf'(?:{name})\s*{separators}\s*([^\n\r]+)'
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            # Si el resultado es muy corto (1-2 caracteres), podría ser AVS/CVV
+            if len(result) >= 1:
+                # Limpiar números al inicio
+                result = re.sub(r'^\d+\s*[:|»➸]\s*', '', result).strip()
+                if result and len(result) > 0:
+                    return result
+    
+    # 2. Buscar líneas que parezcan mensajes de respuesta
+    # Ej: "Card Issuer Declined CVV", "Payment method added successfully"
+    response_patterns = [
+        r'Card\s+Issuer\s+Declined\s+CVV',
+        r'Payment\s+method\s+added\s+successfully',
+        r'Transaction\s+approved',
+        r'Transaction\s+declined',
+        r'Insufficient\s+funds',
+        r'Invalid\s+card',
+        r'Expired\s+card',
+        r'Card\s+declined',
+        r'Payment\s+failed',
+        r'Payment\s+successful',
+        r'Authentication\s+successful',
+        r'Authentication\s+failed',
+        r'Charge\s+[\d,]+\s*\$',
+        r'Charged\s+[\d,]+\s*\$',
+        r'\$\s*[\d,]+\.?\d*',
+    ]
+    
+    for pattern in response_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(0).strip())
+            if len(result) > 1:
+                return result
+    
+    # 3. Buscar líneas que empiecen con "-»" o "↠" o "»" (sin etiqueta clara)
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        # Si la línea empieza con un separador y no tiene campo etiquetado
+        if re.match(r'^[↠»➸\-–—]\s*', line):
+            content = clean_text(re.sub(r'^[↠»➸\-–—]\s*', '', line))
+            if content and len(content) > 5 and not re.search(r'\d{14,16}', content):
+                return content
+    
+    # 4. Buscar cualquier línea que contenga "$" con un monto
+    dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', text)
+    if dollar_match:
+        return clean_text(dollar_match.group(0).strip())
     
     return "Not Found"
 
@@ -131,7 +197,8 @@ def extract_card_info(text: str) -> dict | None:
     
     card_patterns = [
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'(?:CC|CARD)\s*[↠»➸:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'(?:CC|CARD)\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'⚜️\s*CC\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
@@ -155,17 +222,19 @@ def extract_card_info(text: str) -> dict | None:
     # ---------- NORMALIZAR TEXTO ----------
     text_norm = normalize_text(text_clean)
 
-    # ---------- EXTRACCIÓN DE STATUS Y RESULT ----------
+    # ---------- EXTRACCIÓN DE STATUS ----------
     status_field = extract_field(text_clean, ['STATUS', 'ESTADO', 'STAT', 'ESTATUS'])
-    result_field = extract_field(text_clean, ['RESULT', 'RESPONSE', 'MESSAGE', 'MSG', 'REPLY'])
     
-    if result_field == "Not Found":
-        result_match = re.search(r'Result\s*[↠»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if result_match:
-            result_field = clean_text(result_match.group(1).strip())
+    if status_field == "Not Found":
+        status_match = re.search(r'Status\s*[-»:]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
+        if status_match:
+            status_field = clean_text(status_match.group(1).strip())
     
     print(f"📊 Status extraído: {status_field}")
-    print(f"📝 Result extraído: {result_field}")
+
+    # ---------- EXTRACCIÓN DE RESPONSE ----------
+    response = extract_response(text_clean)
+    print(f"📝 Response extraído: {response}")
 
     # ---------- FILTRADO DE APROBACIÓN ----------
     success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 
@@ -186,13 +255,15 @@ def extract_card_info(text: str) -> dict | None:
     
     if status_field == "Not Found":
         has_success = any(word in text_norm for word in success_words)
+        # Si no hay status, buscar rechazo en el response (pero no bloquear si es solo información)
+        has_reject = any(word in text_norm for word in reject_words)
     
-    if has_reject:
-        print("❌ Mensaje RECHAZADO (Status contiene rechazo)")
+    if has_reject and not has_success:
+        print("❌ Mensaje RECHAZADO (contiene rechazo y no tiene éxito)")
         return None
     
     if not has_success:
-        print("❌ Mensaje IGNORADO (Status no tiene éxito)")
+        print("❌ Mensaje IGNORADO (no tiene éxito)")
         return None
     
     print("✅ MENSAJE APROBADO!")
@@ -207,53 +278,40 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"📊 Status final: {status}")
 
-    # ---------- ASIGNAR RESPONSE ----------
-    response = result_field if result_field != "Not Found" else "Not Found"
-    if response != "Not Found":
-        response = re.sub(r'^\d+\s*[:|»➸]\s*', '', response).strip()
-    
-    print(f"📝 Response final: {response}")
-
-    # ---------- EXTRACCIÓN DE GATEWAY (MEJORADA) ----------
+    # ---------- EXTRACCIÓN DE GATEWAY ----------
     gateway = extract_gateway(text_clean, text_norm)
-    print(f"🚪 Gateway: {gateway}")
+    print(f"🚪 Gateway final: {gateway}")
 
     # ---------- EXTRACCIÓN DE BANK ----------
     bank = "Not Found"
-    bank_field = extract_field(text_clean, ['BANK', 'BANCO', 'ISSUER'])
-    if bank_field != "Not Found":
-        bank = bank_field
+    bank_match = re.search(r'Bank\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
+    if bank_match:
+        bank = clean_text(bank_match.group(1).strip())
     else:
-        bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if bin_section:
-            bin_text = bin_section.group(1).strip()
-            bank_match = re.search(r'Bank\s*[↠»➸]\s*([^\n\r]+)', bin_text, re.IGNORECASE)
-            if bank_match:
-                bank = clean_text(bank_match.group(1).strip())
+        bank_field = extract_field(text_clean, ['BANK', 'BANCO', 'ISSUER'])
+        if bank_field != "Not Found":
+            bank = bank_field
     
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRACCIÓN DE COUNTRY ----------
     country = "Not Found"
     flag = "❓"
-    country_field = extract_field(text_clean, ['COUNTRY', 'PAIS'])
-    if country_field != "Not Found":
-        country = country_field
+    country_match = re.search(r'Country\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
+    if country_match:
+        country = clean_text(country_match.group(1).strip())
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
         if flag_match:
             flag = flag_match.group(1)
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
     else:
-        bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if bin_section:
-            bin_text = bin_section.group(1).strip()
-            country_match = re.search(r'Country\s*[↠»➸]\s*([^\n\r]+)', bin_text, re.IGNORECASE)
-            if country_match:
-                country = clean_text(country_match.group(1).strip())
-                flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
-                if flag_match:
-                    flag = flag_match.group(1)
-                    country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
+        country_field = extract_field(text_clean, ['COUNTRY', 'PAIS'])
+        if country_field != "Not Found":
+            country = country_field
+            flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
+            if flag_match:
+                flag = flag_match.group(1)
+                country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
     
     print(f"🌍 Country: {country} {flag}")
 
@@ -262,24 +320,30 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-    if bin_section:
-        bin_text = bin_section.group(1).strip()
-        
-        brand_match = re.search(r'Brand\s*[↠»➸]\s*([^\n\r]+)', bin_text, re.IGNORECASE)
+    info_match = re.search(r'Info\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
+    if info_match:
+        info_text = info_match.group(1).strip()
+        parts = [p.strip() for p in info_text.split('-') if p.strip()]
+        if len(parts) >= 3:
+            card_type = clean_text(parts[0])
+            brand = clean_text(parts[1])
+            level = clean_text(parts[2])
+        elif len(parts) >= 2:
+            card_type = clean_text(parts[0])
+            brand = clean_text(parts[1])
+    
+    if brand == "Unknown":
+        brand_match = re.search(r'Brand\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if brand_match:
             brand = clean_text(brand_match.group(1).strip())
-        else:
-            for kw in ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER']:
-                if kw in bin_text.upper():
-                    brand = kw
-                    break
-        
-        type_match = re.search(r'Type\s*[↠»➸]\s*([^\n\r]+)', bin_text, re.IGNORECASE)
+    
+    if card_type == "Unknown":
+        type_match = re.search(r'Type\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if type_match:
             card_type = clean_text(type_match.group(1).strip())
-        
-        level_match = re.search(r'Level\s*[↠»➸]\s*([^\n\r]+)', bin_text, re.IGNORECASE)
+    
+    if level == "Unknown":
+        level_match = re.search(r'Level\s*[:|»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if level_match:
             level = clean_text(level_match.group(1).strip())
     
