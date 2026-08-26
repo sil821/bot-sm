@@ -48,21 +48,15 @@ async def get_bin_info(bin_number: str) -> dict:
 def clean_text(text: str) -> str:
     if not text or text == "Not Found":
         return text
-    # Eliminar caracteres molestos pero mantener información
     cleaned = re.sub(r'[\*\`"\']', '', text)
-    # Eliminar emojis ⚡
-    cleaned = re.sub(r'[⚡]', '', cleaned)
+    cleaned = re.sub(r'[⚡💳✅✓]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
 def remove_spoiler(text: str) -> str:
-    """Elimina marcadores de spoiler ||texto|| para poder analizar el contenido"""
-    # Eliminar || ... || (spoiler)
-    text = re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
-    return text
+    return re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
 
 def extract_card_info(text: str) -> dict | None:
-    # Primero, eliminar spoilers para poder analizar el texto
     text_clean = remove_spoiler(text)
     text_upper = text_clean.upper()
     
@@ -70,23 +64,15 @@ def extract_card_info(text: str) -> dict | None:
     print(text_clean[:500] + "..." if len(text_clean) > 500 else text_clean)
     print("---")
 
-    # ---------- PATRONES CC (más flexibles) ----------
+    # ---------- PATRONES CC ----------
     card_patterns = [
-        # Formato estándar con |
         r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
-        # Formato con :
         r'(\d{14,16}):(\d{1,2}):(\d{2,4}):(\d{3,4})',
-        # CC: número|mes|año|cvv
         r'[Cc][Cc]\s*[:|]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
-        # Card: número|mes|año|cvv
         r'[Cc]ard\s*[:|]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
-        # 4008950056640493|11|29|149 (sin etiqueta)
         r'(\d{14,16})\s*[|]\s*(\d{1,2})\s*[|]\s*(\d{2,4})\s*[|]\s*(\d{3,4})',
-        # Con emoji 💳
         r'💳\s*[:|]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
-        # Con ⚡
         r'⚡\s*[Cc][Cc]\s*[:|]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})',
-        # Formato con - (ej: 4008950056640493-11-29-149)
         r'(\d{14,16})-(\d{1,2})-(\d{2,4})-(\d{3,4})',
     ]
     
@@ -104,15 +90,18 @@ def extract_card_info(text: str) -> dict | None:
     card_info = f"{cc}|{month}|{year}|{cvv}"
     bin_num = cc[:6]
 
-    # ---------- FILTRADO DE APROBACIÓN ----------
-    success_keywords = r'(?:APPROVED|APROBADA|LIVE|CHARGED|CHARGE|AUTH|AUTHORIZED|ADDED|SUCCESSFUL|EXITOSA|COMPLETED|ACCEPTED)'
+    # ---------- FILTRADO DE APROBACIÓN (MEJORADO) ----------
+    # Palabras de éxito - AHORA INCLUYE "LIVE" explícitamente
+    success_keywords = r'(?:APPROVED|APROBADA|LIVE|LIVE ✅|CHARGED|CHARGE|AUTH|AUTHORIZED|ADDED|SUCCESSFUL|EXITOSA|COMPLETED|ACCEPTED|CCN LIVE|CARD LIVE|CVV LIVE)'
+    # Palabras de rechazo
     reject_keywords = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED|EXPIRED|FAILED|INSUFFICIENT'
 
     has_success = re.search(success_keywords, text_upper, re.IGNORECASE)
     has_reject = re.search(reject_keywords, text_upper, re.IGNORECASE)
 
+    # Si NO hay éxito O hay rechazo, ignorar
     if not has_success:
-        print("No se encontró aprobación")
+        print("No se encontró aprobación o LIVE")
         return None
     if has_reject:
         print("Se encontró rechazo")
@@ -120,21 +109,20 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRACCIÓN DE GATEWAY ----------
     gateway = "Not Found"
-    gateway_keywords = r'(?:BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK|PLUG|VITAL|AUTHORIZE|AUTHORIZED)'
+    # AÑADIDO SHOPIFY y más gateways
+    gateway_keywords = r'(?:BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK|PLUG|VITAL|AUTHORIZE|AUTHORIZED|SHOPIFY|SHOPIFY PAYMENTS|SHOPIFY CHECKOUT)'
     
-    # Buscar campos etiquetados
     gateway_patterns = [
         r'(?:GATEWAY|GATE|PASARELA|𝙂𝙖𝙩𝙚𝙬𝙖𝙮|𝗚𝗮𝘁𝗲|𝐆𝐚𝐭𝐞𝐰𝐚𝐲)\s*[:|»➸-]\s*([^\n\r]+)',
         r'⚡\s*Gat[ée]\s*[:|»➸-]\s*([^\n\r]+)',
         r'⚡\s*Gate[wy]?\s*[:|»➸-]\s*([^\n\r]+)',
-        r'#([A-Za-z0-9_\s]+)',  # #Stripe
+        r'#([A-Za-z0-9_\s]+)',
     ]
     
     for pattern in gateway_patterns:
         match = re.search(pattern, text_clean, re.IGNORECASE)
         if match:
             gateway = clean_text(match.group(1).strip())
-            # Si el gateway tiene números de tarjeta, descartar
             if re.search(r'\d{14,16}', gateway):
                 continue
             break
@@ -148,7 +136,7 @@ def extract_card_info(text: str) -> dict | None:
             gateway = ' | '.join(unique)
             gateway = clean_text(gateway)
     
-    print(f"Gateway: {gateway}")
+    print(f"Gateway detectado: {gateway}")
 
     # ---------- EXTRACCIÓN DE STATUS ----------
     status = "Approved ✓"
@@ -161,6 +149,10 @@ def extract_card_info(text: str) -> dict | None:
         if match:
             status = clean_text(match.group(1).strip())
             break
+    
+    # Si el mensaje tiene "LIVE" en el título, poner status "Live ✓"
+    if re.search(r'\bLIVE\b', text_upper):
+        status = "Live ✓"
 
     # ---------- EXTRACCIÓN DE RESPONSE ----------
     response = "Not Found"
@@ -218,18 +210,15 @@ def extract_card_info(text: str) -> dict | None:
         if brand_match:
             brand = clean_text(brand_match.group(1).strip())
         else:
-            # Intentar extraer de texto plano
             parts = re.split(r'[|]', bin_info)
             if parts and len(parts) > 0:
                 if 'VISA' in parts[0].upper() or 'MASTERCARD' in parts[0].upper() or 'AMEX' in parts[0].upper():
                     brand = clean_text(parts[0].strip())
         
-        # Buscar Type
         type_match = re.search(r'Type\s*[:|»➸-]\s*([^\n\r]+)', bin_info, re.IGNORECASE)
         if type_match:
             card_type = clean_text(type_match.group(1).strip())
         
-        # Buscar Level
         level_match = re.search(r'Level\s*[:|»➸-]\s*([^\n\r]+)', bin_info, re.IGNORECASE)
         if level_match:
             level = clean_text(level_match.group(1).strip())
@@ -287,7 +276,6 @@ async def handler(event):
     cards_in_progress.add(card_clean)
 
     try:
-        # Obtener info de BIN
         bin_info_api = await get_bin_info(card_data['bin_number'])
         if bin_info_api.get('brand') and bin_info_api['brand'] != 'N/A':
             card_data['brand'] = clean_text(bin_info_api['brand'])
