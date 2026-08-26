@@ -35,33 +35,32 @@ cards_in_progress = set()
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 # ------------------- FUNCIONES -------------------
-def normalize_text(text: str) -> str:
-    text = re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
-    text = unicodedata.normalize('NFKD', text)
-    text = text.encode('ASCII', 'ignore').decode('ASCII')
-    text = text.upper()
-    return text
-
 def clean_text(text: str) -> str:
-    if not text or text == "Not Found":
-        return text
-    cleaned = re.sub(r'[\*\`"\']', '', text)
-    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️]', '', cleaned)
+    if not text:
+        return "Not Found"
+    # Solo limpiar caracteres molestos, sin eliminar información
+    cleaned = re.sub(r'[\*\`]', '', text)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def extract_field(text: str, field_name: str, default="Not Found") -> str:
+def get_field(text: str, field_name: str) -> str:
     """
-    EXTRAE LO QUE SALE DESPUÉS DE UN CAMPO ESPECÍFICO.
+    EXTRAE LO QUE SALE DESPUÉS DE UN CAMPO.
     Ej: "Response: Charged 1$" -> "Charged 1$"
     """
     # Buscar el campo con diferentes separadores
-    separators = r'[:|»➸↠\-–—]'
-    pattern = rf'{field_name}\s*{separators}\s*([^\n\r]+)'
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        return clean_text(match.group(1).strip())
-    return default
+    patterns = [
+        rf'{field_name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        rf'⚜️\s*{field_name}\s*[-»:]\s*([^\n\r]+)',
+        rf'⚡\s*{field_name}\s*[-»:]\s*([^\n\r]+)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return clean_text(match.group(1).strip())
+    
+    return "Not Found"
 
 def extract_card_info(text: str) -> dict | None:
     print("\n" + "="*60)
@@ -83,7 +82,6 @@ def extract_card_info(text: str) -> dict | None:
     for pattern in card_patterns:
         match_cc = re.search(pattern, text_clean, re.IGNORECASE)
         if match_cc:
-            print(f"✅ CC ENCONTRADO")
             break
     
     if not match_cc:
@@ -95,52 +93,46 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
     print(f"💳 Tarjeta: {card_info}")
 
-    # ---------- EXTRACCIÓN DE STATUS ----------
-    status = extract_field(text_clean, 'STATUS')
+    # ---------- EXTRAER STATUS ----------
+    status = get_field(text_clean, "STATUS")
     if status == "Not Found":
-        status = extract_field(text_clean, 'ESTADO')
+        status = get_field(text_clean, "ESTADO")
     if status == "Not Found":
-        status = extract_field(text_clean, 'STAT')
+        status = get_field(text_clean, "STAT")
     if status == "Not Found":
-        status_match = re.search(r'Status\s*[-»:]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if status_match:
-            status = clean_text(status_match.group(1).strip())
-    
+        status = "Approved ✓"  # Por defecto si no encuentra
+
     print(f"📊 Status: {status}")
 
-    # ---------- EXTRACCIÓN DE RESPONSE (DIRECTO) ----------
-    response = extract_field(text_clean, 'RESPONSE')
+    # ---------- EXTRAER RESPONSE ----------
+    response = get_field(text_clean, "RESPONSE")
     if response == "Not Found":
-        response = extract_field(text_clean, 'RESULT')
+        response = get_field(text_clean, "RESULT")
     if response == "Not Found":
-        response = extract_field(text_clean, 'MESSAGE')
-    if response == "Not Found":
-        response_match = re.search(r'Response\s*[-»:]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
-        if response_match:
-            response = clean_text(response_match.group(1).strip())
+        response = get_field(text_clean, "MESSAGE")
     
     print(f"📝 Response: {response}")
 
-    # ---------- EXTRACCIÓN DE GATEWAY ----------
-    gateway = extract_field(text_clean, 'GATEWAY')
+    # ---------- EXTRAER GATEWAY ----------
+    gateway = get_field(text_clean, "GATEWAY")
     if gateway == "Not Found":
-        gateway = extract_field(text_clean, 'GATE')
+        gateway = get_field(text_clean, "GATE")
     if gateway == "Not Found":
-        gateway = extract_field(text_clean, 'PASARELA')
+        gateway = get_field(text_clean, "PASARELA")
     
     print(f"🚪 Gateway: {gateway}")
 
-    # ---------- EXTRACCIÓN DE BANK ----------
-    bank = extract_field(text_clean, 'BANK')
+    # ---------- EXTRAER BANK ----------
+    bank = get_field(text_clean, "BANK")
     if bank == "Not Found":
-        bank = extract_field(text_clean, 'BANCO')
+        bank = get_field(text_clean, "BANCO")
     
     print(f"🏦 Bank: {bank}")
 
-    # ---------- EXTRACCIÓN DE COUNTRY ----------
-    country = extract_field(text_clean, 'COUNTRY')
+    # ---------- EXTRAER COUNTRY ----------
+    country = get_field(text_clean, "COUNTRY")
     if country == "Not Found":
-        country = extract_field(text_clean, 'PAIS')
+        country = get_field(text_clean, "PAIS")
     
     flag = "❓"
     if country != "Not Found":
@@ -151,14 +143,14 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"🌍 Country: {country} {flag}")
 
-    # ---------- EXTRACCIÓN DE BRAND, TYPE, LEVEL ----------
+    # ---------- EXTRAER BRAND, TYPE, LEVEL ----------
     brand = "Unknown"
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = extract_field(text_clean, 'BIN INFO')
+    bin_info = get_field(text_clean, "BIN INFO")
     if bin_info == "Not Found":
-        bin_info = extract_field(text_clean, 'INFO')
+        bin_info = get_field(text_clean, "INFO")
     
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
@@ -171,17 +163,17 @@ def extract_card_info(text: str) -> dict | None:
             brand = clean_text(parts[1])
     
     if brand == "Unknown":
-        brand_field = extract_field(text_clean, 'BRAND')
+        brand_field = get_field(text_clean, "BRAND")
         if brand_field != "Not Found":
             brand = brand_field
     
     if card_type == "Unknown":
-        type_field = extract_field(text_clean, 'TYPE')
+        type_field = get_field(text_clean, "TYPE")
         if type_field != "Not Found":
             card_type = type_field
     
     if level == "Unknown":
-        level_field = extract_field(text_clean, 'LEVEL')
+        level_field = get_field(text_clean, "LEVEL")
         if level_field != "Not Found":
             level = level_field
     
@@ -242,14 +234,11 @@ async def handler(event):
     card_clean = re.sub(r'[\s|-]', '', card_full)
 
     if card_clean in processed_cards:
-        print(f"⏭️ Tarjeta {card_clean} ya procesada")
         return
     if card_clean in cards_in_progress:
-        print(f"⏳ Tarjeta {card_clean} en proceso")
         return
 
     cards_in_progress.add(card_clean)
-    print(f"🔄 Procesando tarjeta: {card_clean}")
 
     try:
         bin_info = await get_bin_info(card_data['bin_number'])
@@ -312,14 +301,13 @@ async def handler(event):
                 break
             except telebot.apihelper.ApiException as e:
                 if 'Too Many Requests' in str(e):
-                    print(f"⏳ Rate limit, esperando 5s... (intento {attempt+1}/3)")
                     await asyncio.sleep(5)
                 elif attempt < 2:
                     await asyncio.sleep(3)
                 else:
-                    print(f"❌ Fallo después de 3 intentos: {e}")
+                    print(f"❌ Fallo: {e}")
             except Exception as e:
-                print(f"❌ Error al enviar: {e}")
+                print(f"❌ Error: {e}")
                 break
     finally:
         cards_in_progress.discard(card_clean)
@@ -328,7 +316,7 @@ async def handler(event):
 async def main():
     print("🚀 Iniciando cliente de Telegram...")
     await client.start()
-    print("✅ ¡Bot en ejecución! Esperando mensajes...")
+    print("✅ ¡Bot en ejecución!")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
