@@ -34,31 +34,34 @@ processed_cards = set()
 cards_in_progress = set()
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
-# ------------------- FUNCIONES -------------------
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    # Solo limpiar caracteres molestos, sin eliminar información
     cleaned = re.sub(r'[\*\`]', '', text)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def get_field(text: str, field_name: str) -> str:
+def get_field(text: str, field_names: list) -> str:
     """
-    EXTRAE LO QUE SALE DESPUÉS DE UN CAMPO.
-    Ej: "Response: Charged 1$" -> "Charged 1$"
+    Busca un campo en el texto, con soporte para UNICODE.
+    field_names: lista de posibles nombres del campo
     """
-    # Buscar el campo con diferentes separadores
-    patterns = [
-        rf'{field_name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        rf'⚜️\s*{field_name}\s*[-»:]\s*([^\n\r]+)',
-        rf'⚡\s*{field_name}\s*[-»:]\s*([^\n\r]+)',
-    ]
+    separators = r'[:|»➸↠\-–—]'
     
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return clean_text(match.group(1).strip())
+    for field_name in field_names:
+        # Buscar patrones con diferentes variantes
+        patterns = [
+            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0:
+                    return result
     
     return "Not Found"
 
@@ -94,53 +97,39 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    status = get_field(text_clean, "STATUS")
+    # Buscar: Status, Estado, Stat, o variantes UNICODE
+    status = get_field(text_clean, ["STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
     if status == "Not Found":
-        status = get_field(text_clean, "ESTADO")
-    if status == "Not Found":
-        status = get_field(text_clean, "STAT")
-    if status == "Not Found":
-        status = "Approved ✓"  # Por defecto si no encuentra
-
+        status = "Approved ✓"  # Por defecto
     print(f"📊 Status: {status}")
 
     # ---------- EXTRAER RESPONSE ----------
-    response = get_field(text_clean, "RESPONSE")
-    if response == "Not Found":
-        response = get_field(text_clean, "RESULT")
-    if response == "Not Found":
-        response = get_field(text_clean, "MESSAGE")
-    
+    # Buscar: Response, Result, Message, o variantes UNICODE
+    response = get_field(text_clean, ["RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
     print(f"📝 Response: {response}")
 
     # ---------- EXTRAER GATEWAY ----------
-    gateway = get_field(text_clean, "GATEWAY")
-    if gateway == "Not Found":
-        gateway = get_field(text_clean, "GATE")
-    if gateway == "Not Found":
-        gateway = get_field(text_clean, "PASARELA")
-    
+    # Buscar: Gateway, Gate, Pasarela, o variantes UNICODE
+    gateway = get_field(text_clean, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     print(f"🚪 Gateway: {gateway}")
 
     # ---------- EXTRAER BANK ----------
-    bank = get_field(text_clean, "BANK")
+    bank = get_field(text_clean, ["BANK", "BANCO"])
     if bank == "Not Found":
-        bank = get_field(text_clean, "BANCO")
-    
+        # Buscar en "Info" o similar
+        bin_info_text = get_field(text_clean, ["BIN INFO", "INFO"])
+        if bin_info_text != "Not Found":
+            bank = clean_text(bin_info_text)
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
-    country = get_field(text_clean, "COUNTRY")
-    if country == "Not Found":
-        country = get_field(text_clean, "PAIS")
-    
+    country = get_field(text_clean, ["COUNTRY", "PAIS"])
     flag = "❓"
     if country != "Not Found":
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
         if flag_match:
             flag = flag_match.group(1)
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
-    
     print(f"🌍 Country: {country} {flag}")
 
     # ---------- EXTRAER BRAND, TYPE, LEVEL ----------
@@ -148,10 +137,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field(text_clean, "BIN INFO")
-    if bin_info == "Not Found":
-        bin_info = get_field(text_clean, "INFO")
-    
+    bin_info = get_field(text_clean, ["BIN INFO", "INFO"])
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
@@ -163,19 +149,11 @@ def extract_card_info(text: str) -> dict | None:
             brand = clean_text(parts[1])
     
     if brand == "Unknown":
-        brand_field = get_field(text_clean, "BRAND")
-        if brand_field != "Not Found":
-            brand = brand_field
-    
+        brand = get_field(text_clean, ["BRAND"])
     if card_type == "Unknown":
-        type_field = get_field(text_clean, "TYPE")
-        if type_field != "Not Found":
-            card_type = type_field
-    
+        card_type = get_field(text_clean, ["TYPE"])
     if level == "Unknown":
-        level_field = get_field(text_clean, "LEVEL")
-        if level_field != "Not Found":
-            level = level_field
+        level = get_field(text_clean, ["LEVEL"])
     
     print(f"🏷️ Brand: {brand}, Type: {card_type}, Level: {level}")
 
