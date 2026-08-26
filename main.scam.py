@@ -5,6 +5,7 @@ import random
 import asyncio
 import aiohttp
 import telebot
+import unicodedata
 from telethon.sync import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.types import Message
@@ -34,6 +35,18 @@ cards_in_progress = set()
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 # ------------------- FUNCIONES AUXILIARES -------------------
+def normalize_text(text: str) -> str:
+    """Convierte caracteres UNICODE a ASCII normal (ej: 𝗟𝗶𝘃𝗲 -> LIVE)"""
+    # Eliminar spoilers primero
+    text = re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
+    # Normalizar UNICODE (convierte 𝗟𝗶𝘃𝗲 a Live)
+    text = unicodedata.normalize('NFKD', text)
+    # Convertir a ASCII
+    text = text.encode('ASCII', 'ignore').decode('ASCII')
+    # Subir a mayúsculas
+    text = text.upper()
+    return text
+
 async def get_bin_info(bin_number: str) -> dict:
     try:
         async with aiohttp.ClientSession() as session:
@@ -53,16 +66,15 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def remove_spoiler(text: str) -> str:
-    return re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
-
 def extract_card_info(text: str) -> dict | None:
+    # NORMALIZAR TEXTO PRIMERO (esto convierte 𝗟𝗶𝘃𝗲 -> LIVE)
+    text_normalized = normalize_text(text)
     text_clean = remove_spoiler(text)
-    text_upper = text_clean.upper()
     
     print("\n--- Procesando mensaje ---")
     print(text_clean[:500] + "..." if len(text_clean) > 500 else text_clean)
     print("---")
+    print(f"TEXTO NORMALIZADO: {text_normalized[:200]}...")
 
     # ---------- PATRONES CC ----------
     card_patterns = [
@@ -90,26 +102,26 @@ def extract_card_info(text: str) -> dict | None:
     card_info = f"{cc}|{month}|{year}|{cvv}"
     bin_num = cc[:6]
 
-    # ---------- FILTRADO DE APROBACIÓN (MEJORADO) ----------
-    # Palabras de éxito - AHORA INCLUYE "LIVE" explícitamente
-    success_keywords = r'(?:APPROVED|APROBADA|LIVE|LIVE ✅|CHARGED|CHARGE|AUTH|AUTHORIZED|ADDED|SUCCESSFUL|EXITOSA|COMPLETED|ACCEPTED|CCN LIVE|CARD LIVE|CVV LIVE)'
-    # Palabras de rechazo
+    # ---------- FILTRADO DE APROBACIÓN (CON TEXTO NORMALIZADO) ----------
+    # Ahora usamos text_normalized que ya tiene ASCII y mayúsculas
+    success_keywords = r'(?:APPROVED|APROBADA|LIVE|CHARGED|CHARGE|AUTH|AUTHORIZED|ADDED|SUCCESSFUL|EXITOSA|COMPLETED|ACCEPTED|CCN LIVE|CARD LIVE|CVV LIVE)'
     reject_keywords = r'DEAD|DENIED|REJECTED|ERROR|INCORRECT|TIMEOUT|DECLINED|EXPIRED|FAILED|INSUFFICIENT'
 
-    has_success = re.search(success_keywords, text_upper, re.IGNORECASE)
-    has_reject = re.search(reject_keywords, text_upper, re.IGNORECASE)
+    has_success = re.search(success_keywords, text_normalized, re.IGNORECASE)
+    has_reject = re.search(reject_keywords, text_normalized, re.IGNORECASE)
 
-    # Si NO hay éxito O hay rechazo, ignorar
     if not has_success:
-        print("No se encontró aprobación o LIVE")
+        print("❌ No se encontró aprobación o LIVE en texto normalizado")
+        print(f"Texto normalizado: {text_normalized[:200]}...")
         return None
     if has_reject:
-        print("Se encontró rechazo")
+        print("❌ Se encontró rechazo")
         return None
+
+    print("✅ APROBADO/LIVE DETECTADO!")
 
     # ---------- EXTRACCIÓN DE GATEWAY ----------
     gateway = "Not Found"
-    # AÑADIDO SHOPIFY y más gateways
     gateway_keywords = r'(?:BRAINTREE|STRIPE|ADYEN|PAYFLOW|EAGLE|CHECKOUT|AUTH|GATEWAY|CHECKER|CHK|PLUG|VITAL|AUTHORIZE|AUTHORIZED|SHOPIFY|SHOPIFY PAYMENTS|SHOPIFY CHECKOUT)'
     
     gateway_patterns = [
@@ -127,7 +139,6 @@ def extract_card_info(text: str) -> dict | None:
                 continue
             break
     
-    # Si no se encontró, buscar palabras clave en todo el texto
     if gateway == "Not Found":
         keywords = re.findall(gateway_keywords, text_clean, re.IGNORECASE)
         if keywords:
@@ -140,6 +151,9 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRACCIÓN DE STATUS ----------
     status = "Approved ✓"
+    if re.search(r'\bLIVE\b', text_normalized):
+        status = "Live ✓"
+    
     status_patterns = [
         r'(?:STATUS|RESULT|ESTADO|𝙎𝙩𝙖𝙩𝙪𝙨|𝗦𝘁𝗮𝘁𝘂𝘀|𝐒𝐭𝐚𝐭𝐮𝐬|𝐑𝐞𝐬𝐮𝐥𝐭)\s*[:|»➸-]\s*([^\n\r]+)',
         r'⚡\s*Status\s*[:|»➸-]\s*([^\n\r]+)',
@@ -149,10 +163,6 @@ def extract_card_info(text: str) -> dict | None:
         if match:
             status = clean_text(match.group(1).strip())
             break
-    
-    # Si el mensaje tiene "LIVE" en el título, poner status "Live ✓"
-    if re.search(r'\bLIVE\b', text_upper):
-        status = "Live ✓"
 
     # ---------- EXTRACCIÓN DE RESPONSE ----------
     response = "Not Found"
@@ -205,7 +215,6 @@ def extract_card_info(text: str) -> dict | None:
     bin_info = bin_info_match.group(1).strip() if bin_info_match else ""
     
     if bin_info:
-        # Buscar Brand
         brand_match = re.search(r'Brand\s*[:|»➸-]\s*([^\n\r]+)', bin_info, re.IGNORECASE)
         if brand_match:
             brand = clean_text(brand_match.group(1).strip())
@@ -236,6 +245,9 @@ def extract_card_info(text: str) -> dict | None:
         "country": country,
         "flag": flag,
     }
+
+def remove_spoiler(text: str) -> str:
+    return re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
 
 def generate_extrapolated(card_info: str) -> tuple:
     cc, month, year, cvv = card_info.split('|')
@@ -331,7 +343,7 @@ async def handler(event):
                     reply_markup=keyboard,
                     parse_mode='HTML'
                 )
-                print(f"Mensaje enviado para tarjeta {card_clean}")
+                print(f"✅ Mensaje enviado para tarjeta {card_clean}")
                 processed_cards.add(card_clean)
                 break
             except telebot.apihelper.ApiException as e:
@@ -341,9 +353,9 @@ async def handler(event):
                 elif attempt < 2:
                     await asyncio.sleep(3)
                 else:
-                    print(f"Fallo: {e}")
+                    print(f"❌ Fallo: {e}")
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"❌ Error: {e}")
                 break
     finally:
         cards_in_progress.discard(card_clean)
@@ -352,8 +364,9 @@ async def handler(event):
 async def main():
     print("Iniciando cliente...")
     await client.start()
-    print("¡Bot en ejecución!")
+    print("¡Bot en ejecución! 🍒")
     await client.run_until_disconnected()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
