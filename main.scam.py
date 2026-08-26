@@ -60,6 +60,66 @@ def extract_field(text: str, field_names: list, default="Not Found") -> str:
         return clean_text(match.group(1).strip())
     return default
 
+def extract_gateway(text: str, text_norm: str) -> str:
+    """
+    Extrae el gateway de forma inteligente.
+    SOLO acepta palabras conocidas, NUNCA números.
+    """
+    # Lista de gateways válidos (SOLO letras)
+    VALID_GATEWAYS = [
+        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
+        'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
+        'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
+        'AUTHORIZE', 'AUTHORIZED', 'STRIPE V2', 'STRIPE V3',
+        'BRAINTREE AUTH', 'SHOPIFY PAYMENTS'
+    ]
+    
+    # 1. Buscar campo etiquetado
+    gateway_field = extract_field(text, ['GATEWAY', 'GATE', 'PASARELA', 'GW'])
+    if gateway_field != "Not Found":
+        # Limpiar y verificar que NO sea un número
+        cleaned = clean_text(gateway_field)
+        # Si tiene números de tarjeta (14-16 dígitos), ignorar
+        if re.search(r'\d{14,16}', cleaned):
+            print(f"⚠️ Gateway ignorado (parece número de tarjeta): {cleaned}")
+        # Si tiene #BIN seguido de números, ignorar
+        elif re.search(r'#\d{6}', cleaned):
+            print(f"⚠️ Gateway ignorado (parece BIN): {cleaned}")
+        # Si tiene solo números (o principalmente números), ignorar
+        elif re.search(r'^\d+$', cleaned.replace(' ', '')):
+            print(f"⚠️ Gateway ignorado (solo números): {cleaned}")
+        else:
+            # Verificar que contenga al menos una palabra válida
+            for gw in VALID_GATEWAYS:
+                if gw in cleaned.upper():
+                    return cleaned
+            # Si no contiene ninguna palabra válida, pero es texto, devolverlo
+            # (puede ser un gateway no listado)
+            if len(cleaned) > 1 and not re.search(r'^\d+$', cleaned.replace(' ', '')):
+                return cleaned
+    
+    # 2. Buscar palabras clave en el texto normalizado
+    found = []
+    for gw in VALID_GATEWAYS:
+        if gw in text_norm:
+            found.append(gw)
+    
+    if found:
+        # Eliminar duplicados manteniendo orden
+        seen = set()
+        unique = [gw for gw in found if not (gw in seen or seen.add(gw))]
+        return ' | '.join(unique)
+    
+    # 3. Buscar en campos de "Bin Info" o similar
+    bin_section = re.search(r'(?:BIN INFO|BIN|INFO)(?:[:|»➸↠\-–—])\s*([^\n\r]+)', text, re.IGNORECASE)
+    if bin_section:
+        bin_text = bin_section.group(1).strip()
+        for gw in VALID_GATEWAYS:
+            if gw in bin_text.upper():
+                return gw
+    
+    return "Not Found"
+
 def extract_card_info(text: str) -> dict | None:
     print("\n" + "="*60)
     print("📨 PROCESANDO MENSAJE:")
@@ -95,14 +155,10 @@ def extract_card_info(text: str) -> dict | None:
     # ---------- NORMALIZAR TEXTO ----------
     text_norm = normalize_text(text_clean)
 
-    # ---------- EXTRACCIÓN DE STATUS Y RESULT POR SEPARADO ----------
-    # Extraer Status (esto es lo que decide si es aprobado o no)
+    # ---------- EXTRACCIÓN DE STATUS Y RESULT ----------
     status_field = extract_field(text_clean, ['STATUS', 'ESTADO', 'STAT', 'ESTATUS'])
-    
-    # Extraer Result/Response (esto es lo que va en el campo RESPONSE del mensaje final)
     result_field = extract_field(text_clean, ['RESULT', 'RESPONSE', 'MESSAGE', 'MSG', 'REPLY'])
     
-    # Si no se encontró Result, buscar específicamente "Result ↠"
     if result_field == "Not Found":
         result_match = re.search(r'Result\s*[↠»➸]\s*([^\n\r]+)', text_clean, re.IGNORECASE)
         if result_match:
@@ -111,18 +167,15 @@ def extract_card_info(text: str) -> dict | None:
     print(f"📊 Status extraído: {status_field}")
     print(f"📝 Result extraído: {result_field}")
 
-    # ---------- FILTRADO DE APROBACIÓN (SOLO POR STATUS) ----------
-    # Palabras de éxito para el Status
+    # ---------- FILTRADO DE APROBACIÓN ----------
     success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 
                      'AUTH', 'AUTHORIZED', 'ADDED', 'SUCCESSFUL', 'EXITOSA',
                      'COMPLETED', 'ACCEPTED', 'OK', 'VALID', 'ACTIVE']
     
-    # Palabras de rechazo - SOLO para el Status
     reject_words = ['DEAD', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT', 
                     'TIMEOUT', 'DECLINED', 'EXPIRED', 'FAILED', 'INSUFFICIENT',
                     'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED']
     
-    # Verificar si el Status tiene éxito o rechazo
     has_success = False
     has_reject = False
     
@@ -131,27 +184,20 @@ def extract_card_info(text: str) -> dict | None:
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
     
-    # Si no se encontró campo Status, buscar en todo el texto (pero con cuidado)
     if status_field == "Not Found":
         has_success = any(word in text_norm for word in success_words)
-        # NO buscar reject en todo el texto porque podría estar en Result
     
-    print(f"🔍 Status tiene éxito: {has_success}")
-    print(f"🔍 Status tiene rechazo: {has_reject}")
-    
-    # Si el Status tiene rechazo, ignorar el mensaje
     if has_reject:
         print("❌ Mensaje RECHAZADO (Status contiene rechazo)")
         return None
     
-    # Si NO tiene éxito, ignorar
     if not has_success:
         print("❌ Mensaje IGNORADO (Status no tiene éxito)")
         return None
     
     print("✅ MENSAJE APROBADO!")
 
-    # ---------- ASIGNAR STATUS FINAL ----------
+    # ---------- ASIGNAR STATUS ----------
     if status_field != "Not Found":
         status = status_field
     elif 'LIVE' in text_norm:
@@ -161,26 +207,15 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"📊 Status final: {status}")
 
-    # ---------- ASIGNAR RESPONSE (RESULT) ----------
+    # ---------- ASIGNAR RESPONSE ----------
     response = result_field if result_field != "Not Found" else "Not Found"
     if response != "Not Found":
         response = re.sub(r'^\d+\s*[:|»➸]\s*', '', response).strip()
     
     print(f"📝 Response final: {response}")
 
-    # ---------- EXTRACCIÓN DE GATEWAY ----------
-    gateway = "Not Found"
-    gateway_field = extract_field(text_clean, ['GATEWAY', 'GATE', 'PASARELA', 'GW'])
-    if gateway_field != "Not Found":
-        gateway = gateway_field
-    else:
-        gw_keywords = ['BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
-                      'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
-                      'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL']
-        found = [kw for kw in gw_keywords if kw in text_norm]
-        if found:
-            gateway = ' | '.join(found)
-    
+    # ---------- EXTRACCIÓN DE GATEWAY (MEJORADA) ----------
+    gateway = extract_gateway(text_clean, text_norm)
     print(f"🚪 Gateway: {gateway}")
 
     # ---------- EXTRACCIÓN DE BANK ----------
