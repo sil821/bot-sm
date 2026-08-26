@@ -42,24 +42,69 @@ def clean_text(text: str) -> str:
     return cleaned
 
 def get_field(text: str, field_names: list) -> str:
-    """
-    Busca un campo en el texto, con soporte para UNICODE.
-    """
+    """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—]'
-    
     for field_name in field_names:
         patterns = [
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
         ]
-        
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0:
                     return result
+    return "Not Found"
+
+def extract_gateway(text: str) -> str:
+    """
+    EXTRAE EL GATEWAY DE CUALQUIER LUGAR.
+    Busca: Gateway, Gate, o palabras clave de gateway.
+    """
+    # 1. Buscar campos etiquetados
+    gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
+    if gateway != "Not Found":
+        # Si contiene números de tarjeta, ignorar
+        if re.search(r'\d{14,16}', gateway):
+            gateway = "Not Found"
+        else:
+            return gateway
+    
+    # 2. Buscar palabras clave de gateway en TODO el texto
+    text_upper = text.upper()
+    
+    # Lista COMPLETA de gateways
+    gateway_keywords = [
+        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
+        'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
+        'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
+        'AUTHORIZE', 'AUTHORIZED', 'ATREUS', '2CHECKOUT',
+        'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER', 'WEBMONEY',
+        'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY', 'REALEX',
+        'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
+        'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA',
+        'PROCESSOR', 'PASARELA'
+    ]
+    
+    # Buscar cada palabra clave
+    for gw in gateway_keywords:
+        if gw in text_upper:
+            return gw
+    
+    # 3. Buscar patrón "Gate: X" o "Gateway: X" sin etiqueta exacta
+    gate_patterns = [
+        r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Gat[ée]\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+    ]
+    for pattern in gate_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if not re.search(r'\d{14,16}', result):
+                return result
     
     return "Not Found"
 
@@ -103,30 +148,18 @@ def extract_card_info(text: str) -> dict | None:
             status = "Approved ✓"
     print(f"📊 Status: {status}")
 
-    # ---------- EXTRAER RESPONSE (con Price como fallback) ----------
+    # ---------- EXTRAER RESPONSE ----------
     response = get_field(text_clean, ["RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
-    
-    # Si no hay Response, buscar Price
     if response == "Not Found":
         response = get_field(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
-    
-    # Si aún no hay, buscar $ en el texto
     if response == "Not Found":
         dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', text_clean)
         if dollar_match:
             response = clean_text(dollar_match.group(0).strip())
-    
     print(f"📝 Response: {response}")
 
-    # ---------- EXTRAER GATEWAY ----------
-    gateway = get_field(text_clean, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
-    if gateway == "Not Found":
-        # Buscar palabras clave de gateway
-        gateway_keywords = ['BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'SHOPIFY', 'ZAREK', 'ATREUS']
-        for gw in gateway_keywords:
-            if gw in text_clean.upper():
-                gateway = gw
-                break
+    # ---------- EXTRAER GATEWAY (MEJORADO) ----------
+    gateway = extract_gateway(text_clean)
     print(f"🚪 Gateway: {gateway}")
 
     # ---------- EXTRAER BANK ----------
@@ -186,21 +219,14 @@ def extract_card_info(text: str) -> dict | None:
 
 def generate_extrapolated(card_info: str) -> tuple:
     cc, month, year, cvv = card_info.split('|')
-    
-    # Primera extrapolada: ocultar últimos 4 dígitos
     cc1 = cc[:12] + 'xxxx'
     ext1 = f"{cc1}|{month}|{year}|rnd"
-    
-    # Segunda extrapolada: cambiar un dígito aleatorio
     rand_digit = random.randint(0, 9)
     cc2 = cc[:11] + str(rand_digit) + 'xxxx'
     ext2 = f"{cc2}|{month}|{year}|rnd"
-    
-    # Tercera extrapolada: cambiar dos dígitos
     rand_digits = random.randint(10, 99)
     cc3 = cc[:10] + str(rand_digits) + 'xxxx'
     ext3 = f"{cc3}|{month}|{year}|rnd"
-    
     return ext1, ext2, ext3
 
 async def get_bin_info(bin_number: str) -> dict:
@@ -231,7 +257,6 @@ async def handler(event):
     card_full = card_data['card_info']
     card_clean = re.sub(r'[\s|-]', '', card_full)
 
-    # ----- NO REPETIR CCs -----
     if card_clean in processed_cards:
         print(f"⏭️ Tarjeta {card_clean} ya procesada")
         return
