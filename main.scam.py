@@ -37,29 +37,28 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    # Eliminar __ al principio
     cleaned = re.sub(r'^__\s*', '', text)
     cleaned = re.sub(r'[\*\`"\']', '', cleaned)
-    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️]', '', cleaned)
+    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️〄]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
 def normalize_text(text: str) -> str:
-    """Convierte caracteres UNICODE a ASCII normal"""
     text = unicodedata.normalize('NFKD', text)
     text = text.encode('ASCII', 'ignore').decode('ASCII')
     return text
 
 def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
-    separators = r'[:|»➸↠\-–—]'
+    separators = r'[:|»➸↠\-–—┊]'
     for field_name in field_names:
         patterns = [
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'{field_name}\s*:\s*([^\n\r]+)',
-            rf'{field_name}\s*[-»]\s*([^\n\r]+)',
+            rf'{field_name}\s*[-»┊]\s*([^\n\r]+)',
             rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'〄\s*{field_name}\s*{separators}\s*([^\n\r]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -72,25 +71,42 @@ def get_field_flexible(text: str, field_names: list) -> str:
 def extract_response(text: str) -> str:
     """
     CAPTURA TODOS LOS POSIBLES RESPONSES:
-    - R2:, R3:, R4:, etc.
-    - Response:, Result:, Message:, Msg:, Reply:
-    - Price:, Amount:, Monto:, Precio:
-    - Cualquier línea que empiece con "R" + número
+    - Response, Result, Message, Reply
+    - R2, R3, R4, etc.
+    - Price, Amount, Monto, Precio
     """
     text_norm = normalize_text(text)
     
-    # 1. BUSCAR R2, R3, R4, etc.
-    r_patterns = [
-        r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R2\s*:\s*([^\n\r]+)',
-        r'R3\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R3\s*:\s*([^\n\r]+)',
-        r'R4\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R4\s*:\s*([^\n\r]+)',
-        r'R\d+\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R\d+\s*:\s*([^\n\r]+)',
+    # 1. BUSCAR Response, Result, Message (con separadores incluyendo ┊)
+    response_names = [
+        "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
+        "RESPUESTA", "RESULTADO", "MENSAJE"
     ]
     
+    separators = r'[:|»➸↠\-–—┊]'
+    for name in response_names:
+        patterns = [
+            rf'{name}\s*{separators}\s*([^\n\r]+)',
+            rf'{name}\s*:\s*([^\n\r]+)',
+            rf'{name}\s*[-»┊]\s*([^\n\r]+)',
+            rf'〄\s*{name}\s*{separators}\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response ({name}): {result}")
+                    return result
+    
+    # 2. BUSCAR R2, R3, R4, etc.
+    r_patterns = [
+        r'R2\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+        r'R2\s*:\s*([^\n\r]+)',
+        r'R3\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+        r'R4\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+        r'R\d+\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+    ]
     for pattern in r_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
@@ -99,31 +115,11 @@ def extract_response(text: str) -> str:
                 print(f"✅ Response (R): {result}")
                 return result
     
-    # 2. BUSCAR Response, Result, Message, Msg, Reply
-    response_names = [
-        "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
-        "RESPUESTA", "RESULTADO", "MENSAJE", "RESPOSTA"
-    ]
-    
-    for name in response_names:
-        patterns = [
-            rf'{name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            rf'{name}\s*:\s*([^\n\r]+)',
-            rf'{name}\s*[-»]\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response ({name}): {result}")
-                    return result
-    
     # 3. BUSCAR Price, Amount, Monto, Precio
     price_names = ["PRICE", "AMOUNT", "MONTO", "PRECIO", "COST", "VALUE"]
     for name in price_names:
         patterns = [
-            rf'{name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+            rf'{name}\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
         ]
         for pattern in patterns:
@@ -132,34 +128,16 @@ def extract_response(text: str) -> str:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0":
                     print(f"✅ Response ({name}): {result}")
-                    return result
-    
-    # 4. BUSCAR en texto normalizado (por si tiene caracteres UNICODE)
-    for pattern in r_patterns:
-        match = re.search(pattern, text_norm, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0 and result != "$0.0":
-                print(f"✅ Response (normalizado): {result}")
-                return result
-    
-    # 5. SI NO ENCUENTRA NADA, buscar líneas que empiecen con "R" + número
-    lines = text.split('\n')
-    for line in lines:
-        line_clean = line.strip()
-        if re.match(r'^R\d+\s*[:|»➸↠\-–—]', line_clean, re.IGNORECASE):
-            parts = re.split(r'[:|»➸↠\-–—]', line_clean, 1)
-            if len(parts) > 1:
-                result = clean_text(parts[1].strip())
-                if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response (línea R): {result}")
                     return result
     
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    """EXTRAE EL GATEWAY DE CUALQUIER LUGAR DEL MENSAJE"""
-    
+    """
+    EXTRAE EL GATEWAY:
+    1. Primero busca el campo etiquetado Gateway/Gate/Pasarela
+    2. Si no encuentra, busca palabras clave
+    """
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
@@ -171,26 +149,26 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS (con ┊ incluido)
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
+        # Limpiar y devolver
+        gateway = clean_text(gateway)
         if not re.search(r'\d{14,16}', gateway):
+            print(f"✅ Gateway (campo): {gateway}")
             return gateway
     
-    # 2. BUSCAR EN TODO EL TEXTO (palabras clave)
+    # 2. BUSCAR EN TODO EL TEXTO (palabras clave) - SOLO si no se encontró campo
     text_upper = text.upper()
     found_gateways = []
-    
     for gw in GATEWAY_KEYWORDS:
-        if gw in text_upper:
+        if gw in text_upper and gw not in found_gateways:
             found_gateways.append(gw)
     
     if found_gateways:
-        unique = []
-        for gw in found_gateways:
-            if gw not in unique:
-                unique.append(gw)
-        return ' | '.join(unique) if len(unique) > 1 else unique[0]
+        result = ' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]
+        print(f"✅ Gateway (palabras clave): {result}")
+        return result
     
     return "Not Found"
 
@@ -205,7 +183,8 @@ def extract_card_info(text: str) -> dict | None:
     
     card_patterns = [
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'(?:CC|CARD)\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'(?:CC|CARD)\s*[-»:┊]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'〄\s*Card\s*[┊:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
@@ -226,7 +205,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    status = get_field_flexible(text_clean, ["R1", "STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
+    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
     
     if status != "Not Found":
         status_upper = status.upper()
@@ -263,12 +242,14 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRAER GATEWAY ----------
     gateway = extract_gateway(text_clean)
-    print(f"🚪 Gateway: {gateway}")
+    print(f"🚪 Gateway final: {gateway}")
 
     # ---------- EXTRAER BANK ----------
     bank = get_field_flexible(text_clean, ["BANK", "BANCO"])
     if bank == "Not Found":
         bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
+        if bank == "Not Found":
+            bank = get_field_flexible(text_clean, ["Data"])
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
@@ -286,7 +267,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
+    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data"])
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
