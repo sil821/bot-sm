@@ -37,7 +37,9 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    cleaned = re.sub(r'[\*\`"\']', '', text)
+    # Eliminar __ al principio
+    cleaned = re.sub(r'^__\s*', '', text)
+    cleaned = re.sub(r'[\*\`"\']', '', cleaned)
     cleaned = re.sub(r'[⚡💳✅✓♻️⚜️]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
@@ -172,10 +174,9 @@ def extract_card_info(text: str) -> dict | None:
     
     # 3. SI NO HAY PRICE, BUSCAR $ SOLO EN LÍNEAS QUE NO SEAN EL TÍTULO
     if response == "Not Found":
-        # Buscar $ en el texto, pero ignorar la primera línea (título)
         lines = text_clean.split('\n')
         for i, line in enumerate(lines):
-            if i == 0:  # Saltar primera línea (título)
+            if i == 0:
                 continue
             dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
             if dollar_match:
