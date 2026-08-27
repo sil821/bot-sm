@@ -60,13 +60,11 @@ def get_field(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    """
-    EXTRAE EL GATEWAY DE CUALQUIER LUGAR DEL MENSAJE.
-    Primero busca en campos etiquetados, luego en todo el texto.
-    """
-    # LISTA COMPLETA DE GATEWAYS
+    """EXTRAE EL GATEWAY DE CUALQUIER LUGAR DEL MENSAJE"""
+    
+    # LISTA COMPLETA DE GATEWAYS (ordenados por prioridad)
     GATEWAY_KEYWORDS = [
-        'ADYEN', 'BRAINTREE', 'PAYPAL', 'STRIPE', 'SHOPIFY', 'ZAREK',
+        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
         'CHK', 'PLUG', 'VITAL', 'AUTHORIZE', 'AUTHORIZED', 'ATREUS',
         '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
@@ -79,7 +77,6 @@ def extract_gateway(text: str) -> str:
     # 1. BUSCAR EN CAMPOS ETIQUETADOS
     gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
-        # Verificar que no sea un número de tarjeta
         if not re.search(r'\d{14,16}', gateway):
             return gateway
     
@@ -91,20 +88,20 @@ def extract_gateway(text: str) -> str:
         if gw in text_upper:
             found_gateways.append(gw)
     
-    # Si encontró gateways, devolver el primero (o unirlos con |)
     if found_gateways:
-        # Eliminar duplicados y devolver
         unique = []
         for gw in found_gateways:
             if gw not in unique:
                 unique.append(gw)
         return ' | '.join(unique) if len(unique) > 1 else unique[0]
     
-    # 3. BUSCAR PATRONES SUELTOS
+    # 3. BUSCAR PATRONES SUELTOS (Gate:, Gateway:, etc.)
     gate_patterns = [
         r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'Gat[ée]\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'GATEWAY\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'GATE\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
     ]
     for pattern in gate_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -112,6 +109,20 @@ def extract_gateway(text: str) -> str:
             result = clean_text(match.group(1).strip())
             if not re.search(r'\d{14,16}', result):
                 return result
+    
+    # 4. BUSCAR EN BIN INFO
+    bin_info = get_field(text, ["BIN INFO", "INFO"])
+    if bin_info != "Not Found":
+        for gw in GATEWAY_KEYWORDS:
+            if gw in bin_info.upper():
+                return gw
+    
+    # 5. BUSCAR EN LA PRIMERA LÍNEA (título)
+    first_line = text.split('\n')[0] if text else ""
+    if first_line:
+        for gw in GATEWAY_KEYWORDS:
+            if gw in first_line.upper():
+                return gw
     
     return "Not Found"
 
