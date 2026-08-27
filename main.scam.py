@@ -141,22 +141,17 @@ def extract_card_info(text: str) -> dict | None:
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
         
-        # SI EL STATUS TIENE DECLINED -> RECHAZADO
         if has_reject:
             print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
             return None
         
-        # SI EL STATUS TIENE APPROVED/LIVE -> APROBADO
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            print(f"⚠️ Status no reconocido: {status}")
-            # Si no es rechazo pero tampoco éxito, verificar LIVE en el texto
             if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
                 print("❌ No se encontró LIVE/APPROVED en el texto")
                 return None
     else:
-        # Si no hay campo Status, buscar en todo el texto
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
             print("✅ LIVE/APPROVED encontrado en el texto")
@@ -168,18 +163,24 @@ def extract_card_info(text: str) -> dict | None:
     print(f"📊 Status final: {status}")
 
     # ---------- EXTRAER RESPONSE (R2 o Response) ----------
-    # BUSCAR EN R2:, Response:, Result:, Message:, etc.
+    # 1. BUSCAR EN R2: o Response:
     response = get_field_flexible(text_clean, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
     
-    # SI NO HAY RESPONSE, BUSCAR PRICE
+    # 2. SI NO HAY RESPONSE, BUSCAR PRICE
     if response == "Not Found":
         response = get_field_flexible(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
     
-    # SI NO HAY NADA, BUSCAR $ EN EL TEXTO
+    # 3. SI NO HAY PRICE, BUSCAR $ SOLO EN LÍNEAS QUE NO SEAN EL TÍTULO
     if response == "Not Found":
-        dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', text_clean)
-        if dollar_match:
-            response = clean_text(dollar_match.group(0).strip())
+        # Buscar $ en el texto, pero ignorar la primera línea (título)
+        lines = text_clean.split('\n')
+        for i, line in enumerate(lines):
+            if i == 0:  # Saltar primera línea (título)
+                continue
+            dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
+            if dollar_match:
+                response = clean_text(dollar_match.group(0).strip())
+                break
     
     print(f"📝 Response: {response}")
 
