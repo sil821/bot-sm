@@ -42,6 +42,12 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
+def normalize_text(text: str) -> str:
+    """Convierte caracteres UNICODE a ASCII normal (ej: 𝑹𝟐 -> R2)"""
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ASCII', 'ignore').decode('ASCII')
+    return text
+
 def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—]'
@@ -81,12 +87,12 @@ def extract_gateway(text: str) -> str:
         if not re.search(r'\d{14,16}', gateway):
             return gateway
     
-    # 2. BUSCAR EN TODO EL TEXTO (palabras clave)
-    text_upper = text.upper()
+    # 2. NORMALIZAR TEXTO Y BUSCAR PALABRAS CLAVE
+    text_norm = normalize_text(text).upper()
     found_gateways = []
     
     for gw in GATEWAY_KEYWORDS:
-        if gw in text_upper:
+        if gw in text_norm:
             found_gateways.append(gw)
     
     if found_gateways:
@@ -100,29 +106,99 @@ def extract_gateway(text: str) -> str:
 
 def extract_response(text: str) -> str:
     """
-    EXTRAE EL RESPONSE CON PRIORIDAD:
-    1. R2: o Response: o Result: (máxima prioridad)
-    2. Price: o Amount:
-    3. $ en el texto (SOLO si no hay R2/Response)
+    EXTRAE EL RESPONSE CON NORMALIZACIÓN UNICODE.
+    Busca R2, Response, Result en CUALQUIER FORMATO.
     """
-    # 1. BUSCAR R2: o Response: o Result: (PRIORIDAD MÁXIMA)
-    response = get_field_flexible(text, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
-    if response != "Not Found":
-        return response
+    # NORMALIZAR TEXTO PARA BUSCAR
+    text_norm = normalize_text(text)
+    
+    # 1. BUSCAR R2: o Response: o Result: (CON PATRONES EXPLÍCITOS)
+    patterns = [
+        r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R2\s*:\s*([^\n\r]+)',
+        r'Response\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Response\s*:\s*([^\n\r]+)',
+        r'Result\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Result\s*:\s*([^\n\r]+)',
+        r'RESULTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'RESULTADO\s*:\s*([^\n\r]+)',
+    ]
+    
+    # Buscar en texto original y normalizado
+    for pattern in patterns:
+        # Buscar en texto original
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                print(f"✅ Response encontrado (original): {result}")
+                return result
+        
+        # Buscar en texto normalizado (para caracteres UNICODE)
+        match = re.search(pattern, text_norm, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                print(f"✅ Response encontrado (normalizado): {result}")
+                return result
     
     # 2. BUSCAR PRICE: o AMOUNT:
-    response = get_field_flexible(text, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
-    if response != "Not Found":
-        return response
+    price_patterns = [
+        r'Price\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Amount\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'PRECIO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+    ]
+    for pattern in price_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                return result
     
     # 3. BUSCAR $ EN EL TEXTO (IGNORANDO PRIMERA LÍNEA)
     lines = text.split('\n')
     for i, line in enumerate(lines):
-        if i == 0:  # SALTAR PRIMERA LÍNEA (título)
+        if i == 0:  # SALTAR PRIMERA LÍNEA
             continue
-        dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
-        if dollar_match:
-            return clean_text(dollar_match.group(0).strip())
+        if '$' in line:
+            dollar_match = re.search(r'[^$]*\$[\s]*[\d,]+\.?\d*[^\n\r]*', line)
+            if dollar_match:
+                result = clean_text(dollar_match.group(0).strip())
+                if result and len(result) > 0:
+                    return result
+    
+    return "Not Found"
+
+def extract_status(text: str) -> str:
+    """
+    EXTRAE EL STATUS CON NORMALIZACIÓN UNICODE.
+    Busca R1, Status, Estado en CUALQUIER FORMATO.
+    """
+    text_norm = normalize_text(text)
+    
+    patterns = [
+        r'R1\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R1\s*:\s*([^\n\r]+)',
+        r'Status\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Status\s*:\s*([^\n\r]+)',
+        r'ESTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'ESTADO\s*:\s*([^\n\r]+)',
+        r'STAT\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'STAT\s*:\s*([^\n\r]+)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                return result
+        
+        match = re.search(pattern, text_norm, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                return result
     
     return "Not Found"
 
@@ -157,8 +233,8 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
     print(f"💳 Tarjeta: {card_info}")
 
-    # ---------- EXTRAER STATUS (R1 o Status) ----------
-    status = get_field_flexible(text_clean, ["R1", "STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
+    # ---------- EXTRAER STATUS ----------
+    status = extract_status(text_clean)
     
     # ---------- FILTRAR SOLO APPROVED/LIVE EN STATUS ----------
     if status != "Not Found":
@@ -176,14 +252,15 @@ def extract_card_info(text: str) -> dict | None:
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
+            text_norm = normalize_text(text_clean).upper()
+            if "LIVE" not in text_norm and "APPROVED" not in text_norm:
                 print("❌ No se encontró LIVE/APPROVED en el texto")
                 return None
     else:
-        text_upper = text_clean.upper()
-        if "LIVE" in text_upper or "APPROVED" in text_upper:
+        text_norm = normalize_text(text_clean).upper()
+        if "LIVE" in text_norm or "APPROVED" in text_norm:
             print("✅ LIVE/APPROVED encontrado en el texto")
-            status = "Live ✓" if "LIVE" in text_upper else "Approved ✓"
+            status = "Live ✓" if "LIVE" in text_norm else "Approved ✓"
         else:
             print("❌ No se encontró LIVE ni APPROVED")
             return None
@@ -192,7 +269,7 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRAER RESPONSE ----------
     response = extract_response(text_clean)
-    print(f"📝 Response: {response}")
+    print(f"📝 Response final: {response}")
 
     # ---------- EXTRAER GATEWAY ----------
     gateway = extract_gateway(text_clean)
