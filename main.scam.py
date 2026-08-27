@@ -98,6 +98,34 @@ def extract_gateway(text: str) -> str:
     
     return "Not Found"
 
+def extract_response(text: str) -> str:
+    """
+    EXTRAE EL RESPONSE CON PRIORIDAD:
+    1. R2: o Response: o Result: (máxima prioridad)
+    2. Price: o Amount:
+    3. $ en el texto (SOLO si no hay R2/Response)
+    """
+    # 1. BUSCAR R2: o Response: o Result: (PRIORIDAD MÁXIMA)
+    response = get_field_flexible(text, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
+    if response != "Not Found":
+        return response
+    
+    # 2. BUSCAR PRICE: o AMOUNT:
+    response = get_field_flexible(text, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
+    if response != "Not Found":
+        return response
+    
+    # 3. BUSCAR $ EN EL TEXTO (IGNORANDO PRIMERA LÍNEA)
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if i == 0:  # SALTAR PRIMERA LÍNEA (título)
+            continue
+        dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
+        if dollar_match:
+            return clean_text(dollar_match.group(0).strip())
+    
+    return "Not Found"
+
 def extract_card_info(text: str) -> dict | None:
     print("\n" + "="*60)
     print("📨 PROCESANDO MENSAJE:")
@@ -162,26 +190,8 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"📊 Status final: {status}")
 
-    # ---------- EXTRAER RESPONSE (R2 o Response) ----------
-    # 1. BUSCAR EN R2: o Response:
-    response = get_field_flexible(text_clean, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
-    
-    # 2. SI NO HAY RESPONSE, BUSCAR PRICE
-    if response == "Not Found":
-        response = get_field_flexible(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
-    
-    # 3. SI NO HAY PRICE, BUSCAR $ SOLO EN LÍNEAS QUE NO SEAN EL TÍTULO
-    if response == "Not Found":
-        # Buscar $ en el texto, pero ignorar la primera línea (título)
-        lines = text_clean.split('\n')
-        for i, line in enumerate(lines):
-            if i == 0:  # Saltar primera línea (título)
-                continue
-            dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
-            if dollar_match:
-                response = clean_text(dollar_match.group(0).strip())
-                break
-    
+    # ---------- EXTRAER RESPONSE ----------
+    response = extract_response(text_clean)
     print(f"📝 Response: {response}")
 
     # ---------- EXTRAER GATEWAY ----------
