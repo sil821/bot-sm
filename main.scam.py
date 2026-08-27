@@ -50,51 +50,35 @@ def normalize_text(text: str) -> str:
 
 def extract_response(text: str) -> str:
     """
-    CAPTURA R2 SEA COMO SEA.
+    CAPTURA R2: SEA COMO SEA.
     """
-    # Normalizar texto para buscar caracteres UNICODE
-    text_norm = normalize_text(text)
+    # Buscar R2 en el texto (original y normalizado)
+    for search_text in [text, normalize_text(text)]:
+        # Patrón para R2 con cualquier separador
+        patterns = [
+            r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+            r'R2\s*:\s*([^\n\r]+)',
+            r'R2\s*[-»]\s*([^\n\r]+)',
+            r'R2\s*[↠]\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0" and result != "$0":
+                    print(f"✅ Response encontrado: {result}")
+                    return result
     
-    # Buscar R2 en texto normalizado Y original
-    patterns = [
-        r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R2\s*:\s*([^\n\r]+)',
-        r'R2\s*[-»]\s*([^\n\r]+)',
-        r'Response\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'Response\s*:\s*([^\n\r]+)',
-        r'Result\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'Result\s*:\s*([^\n\r]+)',
-    ]
-    
-    for pattern in patterns:
-        # Buscar en texto original
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0 and result != "$0.0":
-                print(f"✅ Response (original): {result}")
-                return result
-        
-        # Buscar en texto normalizado
-        match = re.search(pattern, text_norm, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0 and result != "$0.0":
-                print(f"✅ Response (normalizado): {result}")
-                return result
-    
-    # SI NO ENCUENTRA R2, BUSCAR POR LÍNEAS QUE EMPIECEN CON "R2"
+    # Si no encuentra con patrones, buscar línea que contenga R2
     lines = text.split('\n')
     for line in lines:
-        line_clean = line.strip()
-        # Si la línea empieza con R2 (con o sin espacios) y tiene :
-        if re.match(r'^R2\s*[:|»➸]', line_clean, re.IGNORECASE):
-            # Extraer todo después del separador
-            parts = re.split(r'[:|»➸]', line_clean, 1)
+        if 'R2' in line.upper():
+            # Extraer todo después de R2
+            parts = re.split(r'R2\s*[:|»➸↠\-–—]\s*', line, flags=re.IGNORECASE)
             if len(parts) > 1:
                 result = clean_text(parts[1].strip())
-                if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response (línea directa): {result}")
+                if result and len(result) > 0 and result != "$0.0" and result != "$0":
+                    print(f"✅ Response encontrado (línea): {result}")
                     return result
     
     return "Not Found"
