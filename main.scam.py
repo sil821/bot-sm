@@ -59,10 +59,32 @@ def get_field(text: str, field_names: list) -> str:
                     return result
     return "Not Found"
 
+def get_field_flexible(text: str, field_names: list) -> str:
+    """
+    Busca un campo en el texto con separadores comunes.
+    VERSIÓN FLEXIBLE: captura R1:, R2:, etc.
+    """
+    separators = r'[:|»➸↠\-–—]'
+    for field_name in field_names:
+        # Buscar con o sin espacio después del nombre
+        patterns = [
+            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'{field_name}\s*:\s*([^\n\r]+)',
+            rf'{field_name}\s*[-»]\s*([^\n\r]+)',
+            rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0:
+                    return result
+    return "Not Found"
+
 def extract_gateway(text: str) -> str:
     """EXTRAE EL GATEWAY DE CUALQUIER LUGAR DEL MENSAJE"""
     
-    # LISTA COMPLETA DE GATEWAYS (ordenados por prioridad)
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
@@ -74,8 +96,8 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS
-    gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS (GATE:, GATEWAY:, etc.)
+    gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
         if not re.search(r'\d{14,16}', gateway):
             return gateway
@@ -95,7 +117,7 @@ def extract_gateway(text: str) -> str:
                 unique.append(gw)
         return ' | '.join(unique) if len(unique) > 1 else unique[0]
     
-    # 3. BUSCAR PATRONES SUELTOS (Gate:, Gateway:, etc.)
+    # 3. BUSCAR PATRONES SUELTOS
     gate_patterns = [
         r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
@@ -109,20 +131,6 @@ def extract_gateway(text: str) -> str:
             result = clean_text(match.group(1).strip())
             if not re.search(r'\d{14,16}', result):
                 return result
-    
-    # 4. BUSCAR EN BIN INFO
-    bin_info = get_field(text, ["BIN INFO", "INFO"])
-    if bin_info != "Not Found":
-        for gw in GATEWAY_KEYWORDS:
-            if gw in bin_info.upper():
-                return gw
-    
-    # 5. BUSCAR EN LA PRIMERA LÍNEA (título)
-    first_line = text.split('\n')[0] if text else ""
-    if first_line:
-        for gw in GATEWAY_KEYWORDS:
-            if gw in first_line.upper():
-                return gw
     
     return "Not Found"
 
@@ -158,7 +166,8 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    status = get_field(text_clean, ["STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
+    # Buscar en R1:, Status:, Estado:, etc.
+    status = get_field_flexible(text_clean, ["R1", "STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
     
     # ---------- FILTRAR SOLO APPROVED/LIVE ----------
     if status != "Not Found":
@@ -191,9 +200,10 @@ def extract_card_info(text: str) -> dict | None:
     print(f"📊 Status final: {status}")
 
     # ---------- EXTRAER RESPONSE ----------
-    response = get_field(text_clean, ["RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
+    # Buscar en R2:, Response:, Result:, Message:, etc.
+    response = get_field_flexible(text_clean, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
     if response == "Not Found":
-        response = get_field(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
+        response = get_field_flexible(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
     if response == "Not Found":
         dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', text_clean)
         if dollar_match:
@@ -205,13 +215,13 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🚪 Gateway: {gateway}")
 
     # ---------- EXTRAER BANK ----------
-    bank = get_field(text_clean, ["BANK", "BANCO"])
+    bank = get_field_flexible(text_clean, ["BANK", "BANCO"])
     if bank == "Not Found":
-        bank = get_field(text_clean, ["BIN INFO", "INFO"])
+        bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
-    country = get_field(text_clean, ["COUNTRY", "PAIS"])
+    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS"])
     flag = "❓"
     if country != "Not Found":
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
@@ -225,7 +235,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field(text_clean, ["BIN INFO", "INFO"])
+    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
@@ -237,11 +247,11 @@ def extract_card_info(text: str) -> dict | None:
             brand = clean_text(parts[1])
     
     if brand == "Unknown":
-        brand = get_field(text_clean, ["BRAND"])
+        brand = get_field_flexible(text_clean, ["BRAND"])
     if card_type == "Unknown":
-        card_type = get_field(text_clean, ["TYPE"])
+        card_type = get_field_flexible(text_clean, ["TYPE"])
     if level == "Unknown":
-        level = get_field(text_clean, ["LEVEL"])
+        level = get_field_flexible(text_clean, ["LEVEL"])
     
     print(f"🏷️ Brand: {brand}, Type: {card_type}, Level: {level}")
 
