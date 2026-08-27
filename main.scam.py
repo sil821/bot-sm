@@ -43,28 +43,87 @@ def clean_text(text: str) -> str:
     return cleaned
 
 def normalize_text(text: str) -> str:
-    """Convierte caracteres UNICODE a ASCII normal (ej: 𝑹𝟐 -> R2)"""
+    """Convierte caracteres UNICODE a ASCII normal"""
     text = unicodedata.normalize('NFKD', text)
     text = text.encode('ASCII', 'ignore').decode('ASCII')
     return text
 
-def get_field_flexible(text: str, field_names: list) -> str:
-    """Busca un campo en el texto con separadores comunes"""
-    separators = r'[:|»➸↠\-–—]'
-    for field_name in field_names:
-        patterns = [
-            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
-            rf'{field_name}\s*:\s*([^\n\r]+)',
-            rf'{field_name}\s*[-»]\s*([^\n\r]+)',
-            rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
-            rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0:
+def extract_response(text: str) -> str:
+    """
+    CAPTURA R2 SEA COMO SEA.
+    """
+    # Normalizar texto para buscar caracteres UNICODE
+    text_norm = normalize_text(text)
+    
+    # Buscar R2 en texto normalizado Y original
+    patterns = [
+        r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R2\s*:\s*([^\n\r]+)',
+        r'R2\s*[-»]\s*([^\n\r]+)',
+        r'Response\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Response\s*:\s*([^\n\r]+)',
+        r'Result\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Result\s*:\s*([^\n\r]+)',
+    ]
+    
+    for pattern in patterns:
+        # Buscar en texto original
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0 and result != "$0.0":
+                print(f"✅ Response (original): {result}")
+                return result
+        
+        # Buscar en texto normalizado
+        match = re.search(pattern, text_norm, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0 and result != "$0.0":
+                print(f"✅ Response (normalizado): {result}")
+                return result
+    
+    # SI NO ENCUENTRA R2, BUSCAR POR LÍNEAS QUE EMPIECEN CON "R2"
+    lines = text.split('\n')
+    for line in lines:
+        line_clean = line.strip()
+        # Si la línea empieza con R2 (con o sin espacios) y tiene :
+        if re.match(r'^R2\s*[:|»➸]', line_clean, re.IGNORECASE):
+            # Extraer todo después del separador
+            parts = re.split(r'[:|»➸]', line_clean, 1)
+            if len(parts) > 1:
+                result = clean_text(parts[1].strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response (línea directa): {result}")
                     return result
+    
+    return "Not Found"
+
+def extract_status(text: str) -> str:
+    text_norm = normalize_text(text)
+    
+    patterns = [
+        r'R1\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R1\s*:\s*([^\n\r]+)',
+        r'Status\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'Status\s*:\s*([^\n\r]+)',
+        r'ESTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'ESTADO\s*:\s*([^\n\r]+)',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                return result
+        
+        match = re.search(pattern, text_norm, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0:
+                return result
+    
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
@@ -79,78 +138,50 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
-    if gateway != "Not Found":
-        if not re.search(r'\d{14,16}', gateway):
-            return gateway
+    # Buscar campos etiquetados
+    patterns = [
+        r'GATEWAY\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'GATE\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'PASARELA\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'𝑮𝑨𝑻𝑬\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+    ]
     
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if not re.search(r'\d{14,16}', result):
+                return result
+    
+    # Buscar palabras clave
     text_norm = normalize_text(text).upper()
-    found_gateways = []
+    found = []
     for gw in GATEWAY_KEYWORDS:
         if gw in text_norm:
-            found_gateways.append(gw)
+            found.append(gw)
     
-    if found_gateways:
+    if found:
         unique = []
-        for gw in found_gateways:
+        for gw in found:
             if gw not in unique:
                 unique.append(gw)
         return ' | '.join(unique) if len(unique) > 1 else unique[0]
     
     return "Not Found"
 
-def extract_response(text: str) -> str:
-    """
-    SOLO CAPTURA R2 O RESPONSE.
-    NADA DE PRICE, NADA DE $, NADA DE MIERDAS.
-    """
-    text_norm = normalize_text(text)
-    
-    # Buscar en texto original Y normalizado
-    for search_text in [text, text_norm]:
+def get_field_flexible(text: str, field_names: list) -> str:
+    separators = r'[:|»➸↠\-–—]'
+    for field_name in field_names:
         patterns = [
-            r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'R2\s*:\s*([^\n\r]+)',
-            r'Response\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'Response\s*:\s*([^\n\r]+)',
-            r'Result\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'Result\s*:\s*([^\n\r]+)',
-            r'RESULTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'RESULTADO\s*:\s*([^\n\r]+)',
-            r'MESSAGE\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'MESSAGE\s*:\s*([^\n\r]+)',
+            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'{field_name}\s*:\s*([^\n\r]+)',
         ]
         for pattern in patterns:
-            match = re.search(pattern, search_text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response encontrado: {result}")
-                    return result
-    
-    return "Not Found"
-
-def extract_status(text: str) -> str:
-    text_norm = normalize_text(text)
-    
-    for search_text in [text, text_norm]:
-        patterns = [
-            r'R1\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'R1\s*:\s*([^\n\r]+)',
-            r'Status\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'Status\s*:\s*([^\n\r]+)',
-            r'ESTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'ESTADO\s*:\s*([^\n\r]+)',
-            r'STAT\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-            r'STAT\s*:\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, search_text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0:
                     return result
-    
     return "Not Found"
 
 def extract_card_info(text: str) -> dict | None:
