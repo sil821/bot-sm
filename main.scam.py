@@ -43,42 +43,46 @@ def clean_text(text: str) -> str:
     return cleaned
 
 def normalize_text(text: str) -> str:
-    """Convierte caracteres UNICODE a ASCII normal"""
     text = unicodedata.normalize('NFKD', text)
     text = text.encode('ASCII', 'ignore').decode('ASCII')
     return text
 
 def extract_response(text: str) -> str:
     """
-    CAPTURA R2: SEA COMO SEA.
+    CAPTURA R2: O Response: O Result:
     """
-    # Buscar R2 en el texto (original y normalizado)
-    for search_text in [text, normalize_text(text)]:
-        # Patrón para R2 con cualquier separador
+    # Normalizar el texto para buscar
+    text_norm = normalize_text(text)
+    
+    # Buscar R2 en el texto original y normalizado
+    for search_text in [text, text_norm]:
+        # Patrones para R2
         patterns = [
-            r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
             r'R2\s*:\s*([^\n\r]+)',
-            r'R2\s*[-»]\s*([^\n\r]+)',
-            r'R2\s*[↠]\s*([^\n\r]+)',
+            r'R2\s*[-»➸↠]\s*([^\n\r]+)',
+            r'R2\s*[|]\s*([^\n\r]+)',
+            r'Response\s*:\s*([^\n\r]+)',
+            r'Response\s*[-»➸↠]\s*([^\n\r]+)',
+            r'Result\s*:\s*([^\n\r]+)',
+            r'Result\s*[-»➸↠]\s*([^\n\r]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, search_text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0" and result != "$0":
-                    print(f"✅ Response encontrado: {result}")
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response: {result}")
                     return result
     
-    # Si no encuentra con patrones, buscar línea que contenga R2
-    lines = text.split('\n')
-    for line in lines:
+    # Si no encuentra, buscar línea que tenga R2
+    for line in text.split('\n'):
         if 'R2' in line.upper():
-            # Extraer todo después de R2
+            # Extraer después de R2
             parts = re.split(r'R2\s*[:|»➸↠\-–—]\s*', line, flags=re.IGNORECASE)
             if len(parts) > 1:
                 result = clean_text(parts[1].strip())
-                if result and len(result) > 0 and result != "$0.0" and result != "$0":
-                    print(f"✅ Response encontrado (línea): {result}")
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response (línea): {result}")
                     return result
     
     return "Not Found"
@@ -86,27 +90,19 @@ def extract_response(text: str) -> str:
 def extract_status(text: str) -> str:
     text_norm = normalize_text(text)
     
-    patterns = [
-        r'R1\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'R1\s*:\s*([^\n\r]+)',
-        r'Status\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'Status\s*:\s*([^\n\r]+)',
-        r'ESTADO\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'ESTADO\s*:\s*([^\n\r]+)',
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0:
-                return result
-        
-        match = re.search(pattern, text_norm, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0:
-                return result
+    for search_text in [text, text_norm]:
+        patterns = [
+            r'R1\s*:\s*([^\n\r]+)',
+            r'R1\s*[-»➸↠]\s*([^\n\r]+)',
+            r'Status\s*:\s*([^\n\r]+)',
+            r'Status\s*[-»➸↠]\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0:
+                    return result
     
     return "Not Found"
 
@@ -122,14 +118,12 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # Buscar campos etiquetados
+    # Buscar en campos etiquetados
     patterns = [
         r'GATEWAY\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'GATE\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'PASARELA\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'𝑮𝑨𝑻𝑬\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
     ]
-    
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
@@ -153,19 +147,12 @@ def extract_gateway(text: str) -> str:
     
     return "Not Found"
 
-def get_field_flexible(text: str, field_names: list) -> str:
-    separators = r'[:|»➸↠\-–—]'
-    for field_name in field_names:
-        patterns = [
-            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
-            rf'{field_name}\s*:\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0:
-                    return result
+def get_field(text: str, field_name: str) -> str:
+    """Busca un campo específico"""
+    pattern = rf'{field_name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        return clean_text(match.group(1).strip())
     return "Not Found"
 
 def extract_card_info(text: str) -> dict | None:
@@ -211,7 +198,7 @@ def extract_card_info(text: str) -> dict | None:
         has_reject = any(word in status_upper for word in reject_words)
         
         if has_reject:
-            print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
+            print(f"❌ MENSAJE RECHAZADO - Status: {status}")
             return None
         
         if has_success:
@@ -219,12 +206,12 @@ def extract_card_info(text: str) -> dict | None:
         else:
             text_norm = normalize_text(text_clean).upper()
             if "LIVE" not in text_norm and "APPROVED" not in text_norm:
-                print("❌ No se encontró LIVE/APPROVED en el texto")
+                print("❌ No se encontró LIVE/APPROVED")
                 return None
     else:
         text_norm = normalize_text(text_clean).upper()
         if "LIVE" in text_norm or "APPROVED" in text_norm:
-            print("✅ LIVE/APPROVED encontrado en el texto")
+            print("✅ LIVE/APPROVED encontrado")
             status = "Live ✓" if "LIVE" in text_norm else "Approved ✓"
         else:
             print("❌ No se encontró LIVE ni APPROVED")
@@ -241,13 +228,21 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🚪 Gateway: {gateway}")
 
     # ---------- EXTRAER BANK ----------
-    bank = get_field_flexible(text_clean, ["BANK", "BANCO"])
+    bank = get_field(text_clean, "BANK")
     if bank == "Not Found":
-        bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
+        bank = get_field(text_clean, "BANCO")
+    if bank == "Not Found":
+        bin_info = get_field(text_clean, "INFO")
+        if bin_info != "Not Found":
+            parts = bin_info.split('-')
+            if len(parts) > 2:
+                bank = clean_text(parts[2].strip())
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
-    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS"])
+    country = get_field(text_clean, "COUNTRY")
+    if country == "Not Found":
+        country = get_field(text_clean, "PAIS")
     flag = "❓"
     if country != "Not Found":
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
@@ -261,7 +256,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
+    bin_info = get_field(text_clean, "INFO")
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
@@ -273,11 +268,11 @@ def extract_card_info(text: str) -> dict | None:
             brand = clean_text(parts[1])
     
     if brand == "Unknown":
-        brand = get_field_flexible(text_clean, ["BRAND"])
+        brand = get_field(text_clean, "BRAND")
     if card_type == "Unknown":
-        card_type = get_field_flexible(text_clean, ["TYPE"])
+        card_type = get_field(text_clean, "TYPE")
     if level == "Unknown":
-        level = get_field_flexible(text_clean, ["LEVEL"])
+        level = get_field(text_clean, "LEVEL")
     
     print(f"🏷️ Brand: {brand}, Type: {card_type}, Level: {level}")
 
