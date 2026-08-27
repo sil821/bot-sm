@@ -37,7 +37,8 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    cleaned = re.sub(r'[\*\`]', '', text)
+    cleaned = re.sub(r'[\*\`"\']', '', text)
+    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
@@ -59,34 +60,47 @@ def get_field(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    """Extrae el gateway de cualquier lugar"""
-    # 1. Buscar campos etiquetados
-    gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
-    if gateway != "Not Found":
-        if re.search(r'\d{14,16}', gateway):
-            gateway = "Not Found"
-        else:
-            return gateway
-    
-    # 2. Buscar palabras clave en TODO el texto
-    text_upper = text.upper()
-    gateway_keywords = [
-        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
-        'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
-        'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
-        'AUTHORIZE', 'ATREUS', '2CHECKOUT', 'PAYMENTWALL',
-        'PAYSAFE', 'SKRILL', 'NETELLER', 'WEBMONEY',
-        'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
-        'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
-        'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA',
-        'PROCESSOR', 'PASARELA'
+    """
+    EXTRAE EL GATEWAY DE CUALQUIER LUGAR DEL MENSAJE.
+    Primero busca en campos etiquetados, luego en todo el texto.
+    """
+    # LISTA COMPLETA DE GATEWAYS
+    GATEWAY_KEYWORDS = [
+        'ADYEN', 'BRAINTREE', 'PAYPAL', 'STRIPE', 'SHOPIFY', 'ZAREK',
+        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
+        'CHK', 'PLUG', 'VITAL', 'AUTHORIZE', 'AUTHORIZED', 'ATREUS',
+        '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
+        'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
+        'REALEX', 'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
+        'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
+        'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    for gw in gateway_keywords:
-        if gw in text_upper:
-            return gw
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS
+    gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
+    if gateway != "Not Found":
+        # Verificar que no sea un número de tarjeta
+        if not re.search(r'\d{14,16}', gateway):
+            return gateway
     
-    # 3. Buscar patrón "Gate:" o "Gateway:"
+    # 2. BUSCAR EN TODO EL TEXTO (palabras clave)
+    text_upper = text.upper()
+    found_gateways = []
+    
+    for gw in GATEWAY_KEYWORDS:
+        if gw in text_upper:
+            found_gateways.append(gw)
+    
+    # Si encontró gateways, devolver el primero (o unirlos con |)
+    if found_gateways:
+        # Eliminar duplicados y devolver
+        unique = []
+        for gw in found_gateways:
+            if gw not in unique:
+                unique.append(gw)
+        return ' | '.join(unique) if len(unique) > 1 else unique[0]
+    
+    # 3. BUSCAR PATRONES SUELTOS
     gate_patterns = [
         r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
@@ -138,31 +152,23 @@ def extract_card_info(text: str) -> dict | None:
     # ---------- FILTRAR SOLO APPROVED/LIVE ----------
     if status != "Not Found":
         status_upper = status.upper()
-        # Palabras de éxito
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        # Palabras de rechazo
         reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT', 'TIMEOUT', 'EXPIRED', 'FAILED', 'INSUFFICIENT', 'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED']
         
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
         
-        # Si tiene rechazo, IGNORAR el mensaje (no mandar)
         if has_reject:
             print(f"❌ MENSAJE RECHAZADO - Status: {status}")
             return None
         
-        # Si tiene éxito, continuar
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            print(f"⚠️ Status no reconocido: {status}")
-            # Por defecto, si no es rechazo, lo dejamos pasar (pero mejor que tenga éxito)
-            # Verificar si "LIVE" en el texto general
             if "LIVE" not in text_clean.upper():
                 print("❌ No se encontró LIVE en el texto")
                 return None
     else:
-        # Si no hay campo Status, buscar en todo el texto
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
             print("✅ LIVE/APPROVED encontrado en el texto")
