@@ -59,41 +59,34 @@ def get_field(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    """
-    EXTRAE EL GATEWAY DE CUALQUIER LUGAR.
-    Busca: Gateway, Gate, o palabras clave de gateway.
-    """
+    """Extrae el gateway de cualquier lugar"""
     # 1. Buscar campos etiquetados
     gateway = get_field(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
-        # Si contiene números de tarjeta, ignorar
         if re.search(r'\d{14,16}', gateway):
             gateway = "Not Found"
         else:
             return gateway
     
-    # 2. Buscar palabras clave de gateway en TODO el texto
+    # 2. Buscar palabras clave en TODO el texto
     text_upper = text.upper()
-    
-    # Lista COMPLETA de gateways
     gateway_keywords = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYFLOW', 'EAGLE', 
         'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER', 'CHK', 
         'PLUG', 'VITAL', 'SHOPIFY', 'ZAREK', 'PAYPAL',
-        'AUTHORIZE', 'AUTHORIZED', 'ATREUS', '2CHECKOUT',
-        'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER', 'WEBMONEY',
-        'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY', 'REALEX',
+        'AUTHORIZE', 'ATREUS', '2CHECKOUT', 'PAYMENTWALL',
+        'PAYSAFE', 'SKRILL', 'NETELLER', 'WEBMONEY',
+        'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
         'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
         'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA',
         'PROCESSOR', 'PASARELA'
     ]
     
-    # Buscar cada palabra clave
     for gw in gateway_keywords:
         if gw in text_upper:
             return gw
     
-    # 3. Buscar patrón "Gate: X" o "Gateway: X" sin etiqueta exacta
+    # 3. Buscar patrón "Gate:" o "Gateway:"
     gate_patterns = [
         r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
         r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
@@ -141,12 +134,44 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRAER STATUS ----------
     status = get_field(text_clean, ["STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
-    if status == "Not Found":
-        if "LIVE" in text_clean.upper():
-            status = "Live ✓"
+    
+    # ---------- FILTRAR SOLO APPROVED/LIVE ----------
+    if status != "Not Found":
+        status_upper = status.upper()
+        # Palabras de éxito
+        success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
+        # Palabras de rechazo
+        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT', 'TIMEOUT', 'EXPIRED', 'FAILED', 'INSUFFICIENT', 'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED']
+        
+        has_success = any(word in status_upper for word in success_words)
+        has_reject = any(word in status_upper for word in reject_words)
+        
+        # Si tiene rechazo, IGNORAR el mensaje (no mandar)
+        if has_reject:
+            print(f"❌ MENSAJE RECHAZADO - Status: {status}")
+            return None
+        
+        # Si tiene éxito, continuar
+        if has_success:
+            print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            status = "Approved ✓"
-    print(f"📊 Status: {status}")
+            print(f"⚠️ Status no reconocido: {status}")
+            # Por defecto, si no es rechazo, lo dejamos pasar (pero mejor que tenga éxito)
+            # Verificar si "LIVE" en el texto general
+            if "LIVE" not in text_clean.upper():
+                print("❌ No se encontró LIVE en el texto")
+                return None
+    else:
+        # Si no hay campo Status, buscar en todo el texto
+        text_upper = text_clean.upper()
+        if "LIVE" in text_upper or "APPROVED" in text_upper:
+            print("✅ LIVE/APPROVED encontrado en el texto")
+            status = "Live ✓" if "LIVE" in text_upper else "Approved ✓"
+        else:
+            print("❌ No se encontró LIVE ni APPROVED")
+            return None
+    
+    print(f"📊 Status final: {status}")
 
     # ---------- EXTRAER RESPONSE ----------
     response = get_field(text_clean, ["RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
@@ -158,7 +183,7 @@ def extract_card_info(text: str) -> dict | None:
             response = clean_text(dollar_match.group(0).strip())
     print(f"📝 Response: {response}")
 
-    # ---------- EXTRAER GATEWAY (MEJORADO) ----------
+    # ---------- EXTRAER GATEWAY ----------
     gateway = extract_gateway(text_clean)
     print(f"🚪 Gateway: {gateway}")
 
