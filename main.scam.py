@@ -44,6 +44,12 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
+def normalize_text(text: str) -> str:
+    """Convierte caracteres UNICODE a ASCII normal"""
+    text = unicodedata.normalize('NFKD', text)
+    text = text.encode('ASCII', 'ignore').decode('ASCII')
+    return text
+
 def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—]'
@@ -61,6 +67,94 @@ def get_field_flexible(text: str, field_names: list) -> str:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0:
                     return result
+    return "Not Found"
+
+def extract_response(text: str) -> str:
+    """
+    CAPTURA TODOS LOS POSIBLES RESPONSES:
+    - R2:, R3:, R4:, etc.
+    - Response:, Result:, Message:, Msg:, Reply:
+    - Price:, Amount:, Monto:, Precio:
+    - Cualquier línea que empiece con "R" + número
+    """
+    text_norm = normalize_text(text)
+    
+    # 1. BUSCAR R2, R3, R4, etc.
+    r_patterns = [
+        r'R2\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R2\s*:\s*([^\n\r]+)',
+        r'R3\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R3\s*:\s*([^\n\r]+)',
+        r'R4\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R4\s*:\s*([^\n\r]+)',
+        r'R\d+\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+        r'R\d+\s*:\s*([^\n\r]+)',
+    ]
+    
+    for pattern in r_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0 and result != "$0.0":
+                print(f"✅ Response (R): {result}")
+                return result
+    
+    # 2. BUSCAR Response, Result, Message, Msg, Reply
+    response_names = [
+        "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
+        "RESPUESTA", "RESULTADO", "MENSAJE", "RESPOSTA"
+    ]
+    
+    for name in response_names:
+        patterns = [
+            rf'{name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+            rf'{name}\s*:\s*([^\n\r]+)',
+            rf'{name}\s*[-»]\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response ({name}): {result}")
+                    return result
+    
+    # 3. BUSCAR Price, Amount, Monto, Precio
+    price_names = ["PRICE", "AMOUNT", "MONTO", "PRECIO", "COST", "VALUE"]
+    for name in price_names:
+        patterns = [
+            rf'{name}\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
+            rf'{name}\s*:\s*([^\n\r]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response ({name}): {result}")
+                    return result
+    
+    # 4. BUSCAR en texto normalizado (por si tiene caracteres UNICODE)
+    for pattern in r_patterns:
+        match = re.search(pattern, text_norm, re.IGNORECASE)
+        if match:
+            result = clean_text(match.group(1).strip())
+            if result and len(result) > 0 and result != "$0.0":
+                print(f"✅ Response (normalizado): {result}")
+                return result
+    
+    # 5. SI NO ENCUENTRA NADA, buscar líneas que empiecen con "R" + número
+    lines = text.split('\n')
+    for line in lines:
+        line_clean = line.strip()
+        if re.match(r'^R\d+\s*[:|»➸↠\-–—]', line_clean, re.IGNORECASE):
+            parts = re.split(r'[:|»➸↠\-–—]', line_clean, 1)
+            if len(parts) > 1:
+                result = clean_text(parts[1].strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    print(f"✅ Response (línea R): {result}")
+                    return result
+    
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
@@ -131,10 +225,9 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
     print(f"💳 Tarjeta: {card_info}")
 
-    # ---------- EXTRAER STATUS (R1 o Status) ----------
+    # ---------- EXTRAER STATUS ----------
     status = get_field_flexible(text_clean, ["R1", "STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
     
-    # ---------- FILTRAR SOLO APPROVED/LIVE EN STATUS ----------
     if status != "Not Found":
         status_upper = status.upper()
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
@@ -144,19 +237,19 @@ def extract_card_info(text: str) -> dict | None:
         has_reject = any(word in status_upper for word in reject_words)
         
         if has_reject:
-            print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
+            print(f"❌ MENSAJE RECHAZADO - Status: {status}")
             return None
         
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
             if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
-                print("❌ No se encontró LIVE/APPROVED en el texto")
+                print("❌ No se encontró LIVE/APPROVED")
                 return None
     else:
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
-            print("✅ LIVE/APPROVED encontrado en el texto")
+            print("✅ LIVE/APPROVED encontrado")
             status = "Live ✓" if "LIVE" in text_upper else "Approved ✓"
         else:
             print("❌ No se encontró LIVE ni APPROVED")
@@ -164,26 +257,9 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"📊 Status final: {status}")
 
-    # ---------- EXTRAER RESPONSE (R2 o Response) ----------
-    # 1. BUSCAR EN R2: o Response:
-    response = get_field_flexible(text_clean, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
-    
-    # 2. SI NO HAY RESPONSE, BUSCAR PRICE
-    if response == "Not Found":
-        response = get_field_flexible(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
-    
-    # 3. SI NO HAY PRICE, BUSCAR $ SOLO EN LÍNEAS QUE NO SEAN EL TÍTULO
-    if response == "Not Found":
-        lines = text_clean.split('\n')
-        for i, line in enumerate(lines):
-            if i == 0:
-                continue
-            dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', line)
-            if dollar_match:
-                response = clean_text(dollar_match.group(0).strip())
-                break
-    
-    print(f"📝 Response: {response}")
+    # ---------- EXTRAER RESPONSE ----------
+    response = extract_response(text_clean)
+    print(f"📝 Response final: {response}")
 
     # ---------- EXTRAER GATEWAY ----------
     gateway = extract_gateway(text_clean)
