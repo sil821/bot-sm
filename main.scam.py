@@ -42,31 +42,10 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
-def get_field(text: str, field_names: list) -> str:
+def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—]'
     for field_name in field_names:
-        patterns = [
-            rf'{field_name}\s*{separators}\s*([^\n\r]+)',
-            rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
-            rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0:
-                    return result
-    return "Not Found"
-
-def get_field_flexible(text: str, field_names: list) -> str:
-    """
-    Busca un campo en el texto con separadores comunes.
-    VERSIÓN FLEXIBLE: captura R1:, R2:, etc.
-    """
-    separators = r'[:|»➸↠\-–—]'
-    for field_name in field_names:
-        # Buscar con o sin espacio después del nombre
         patterns = [
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'{field_name}\s*:\s*([^\n\r]+)',
@@ -96,7 +75,7 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS (GATE:, GATEWAY:, etc.)
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
         if not re.search(r'\d{14,16}', gateway):
@@ -116,21 +95,6 @@ def extract_gateway(text: str) -> str:
             if gw not in unique:
                 unique.append(gw)
         return ' | '.join(unique) if len(unique) > 1 else unique[0]
-    
-    # 3. BUSCAR PATRONES SUELTOS
-    gate_patterns = [
-        r'Gate\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'Gateway\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'Gat[ée]\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'GATEWAY\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-        r'GATE\s*[:|»➸↠\-–—]\s*([^\n\r]+)',
-    ]
-    for pattern in gate_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if not re.search(r'\d{14,16}', result):
-                return result
     
     return "Not Found"
 
@@ -165,30 +129,34 @@ def extract_card_info(text: str) -> dict | None:
     bin_num = cc[:6]
     print(f"💳 Tarjeta: {card_info}")
 
-    # ---------- EXTRAER STATUS ----------
-    # Buscar en R1:, Status:, Estado:, etc.
+    # ---------- EXTRAER STATUS (R1 o Status) ----------
     status = get_field_flexible(text_clean, ["R1", "STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
     
-    # ---------- FILTRAR SOLO APPROVED/LIVE ----------
+    # ---------- FILTRAR SOLO APPROVED/LIVE EN STATUS ----------
     if status != "Not Found":
         status_upper = status.upper()
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'INCORRECT', 'TIMEOUT', 'EXPIRED', 'FAILED', 'INSUFFICIENT', 'CANCELED', 'CANCELLED', 'INVALID', 'BLOCKED']
+        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID']
         
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
         
+        # SI EL STATUS TIENE DECLINED -> RECHAZADO
         if has_reject:
-            print(f"❌ MENSAJE RECHAZADO - Status: {status}")
+            print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
             return None
         
+        # SI EL STATUS TIENE APPROVED/LIVE -> APROBADO
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            if "LIVE" not in text_clean.upper():
-                print("❌ No se encontró LIVE en el texto")
+            print(f"⚠️ Status no reconocido: {status}")
+            # Si no es rechazo pero tampoco éxito, verificar LIVE en el texto
+            if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
+                print("❌ No se encontró LIVE/APPROVED en el texto")
                 return None
     else:
+        # Si no hay campo Status, buscar en todo el texto
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
             print("✅ LIVE/APPROVED encontrado en el texto")
@@ -199,15 +167,20 @@ def extract_card_info(text: str) -> dict | None:
     
     print(f"📊 Status final: {status}")
 
-    # ---------- EXTRAER RESPONSE ----------
-    # Buscar en R2:, Response:, Result:, Message:, etc.
+    # ---------- EXTRAER RESPONSE (R2 o Response) ----------
+    # BUSCAR EN R2:, Response:, Result:, Message:, etc.
     response = get_field_flexible(text_clean, ["R2", "RESPONSE", "RESULT", "MESSAGE", "𝑹𝒆𝒔𝒑𝒐𝒏𝒔𝒆", "𝐑𝐞𝐬𝐩𝐨𝐧𝐬𝐞", "𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲"])
+    
+    # SI NO HAY RESPONSE, BUSCAR PRICE
     if response == "Not Found":
         response = get_field_flexible(text_clean, ["PRICE", "AMOUNT", "MONTO", "PRECIO"])
+    
+    # SI NO HAY NADA, BUSCAR $ EN EL TEXTO
     if response == "Not Found":
         dollar_match = re.search(r'\$\s*[\d,]+\.?\d*', text_clean)
         if dollar_match:
             response = clean_text(dollar_match.group(0).strip())
+    
     print(f"📝 Response: {response}")
 
     # ---------- EXTRAER GATEWAY ----------
