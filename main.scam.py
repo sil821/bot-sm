@@ -37,8 +37,9 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    cleaned = re.sub(r'^__\s*', '', text)
-    cleaned = re.sub(r'[\*\`"\']', '', text)
+    # Eliminar __ de CUALQUIER lugar (no solo al principio)
+    cleaned = re.sub(r'__\s*', '', text)
+    cleaned = re.sub(r'[\*\`"\']', '', cleaned)
     cleaned = re.sub(r'[⚡💳✅✓♻️⚜️〄⪼]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
@@ -50,7 +51,6 @@ def normalize_text(text: str) -> str:
 
 def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
-    # AÑADIDO ⌁ como separador
     separators = r'[:|»➸↠\-–—┊⌁]'
     for field_name in field_names:
         patterns = [
@@ -71,19 +71,9 @@ def get_field_flexible(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_response(text: str) -> str:
-    """
-    CAPTURA TODOS LOS POSIBLES RESPONSES:
-    - Response, Result, Message, Reply
-    - Respuesta (español)
-    - R2, R3, R4, etc.
-    - Price, Amount, Monto, Precio
-    """
-    text_norm = normalize_text(text)
-    
-    # 1. BUSCAR Response, Result, Message, Respuesta (con separadores incluyendo ┊ y ⌁)
     response_names = [
         "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
-        "RESPUESTA", "RESULTADO", "MENSAJE", "RESPONSE"
+        "RESPUESTA", "RESULTADO", "MENSAJE"
     ]
     
     separators = r'[:|»➸↠\-–—┊⌁]'
@@ -103,7 +93,6 @@ def extract_response(text: str) -> str:
                     print(f"✅ Response ({name}): {result}")
                     return result
     
-    # 2. BUSCAR R2, R3, R4, etc.
     r_patterns = [
         r'R2\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
         r'R2\s*:\s*([^\n\r]+)',
@@ -119,7 +108,6 @@ def extract_response(text: str) -> str:
                 print(f"✅ Response (R): {result}")
                 return result
     
-    # 3. BUSCAR Price, Amount, Monto, Precio
     price_names = ["PRICE", "AMOUNT", "MONTO", "PRECIO", "COST", "VALUE"]
     for name in price_names:
         patterns = [
@@ -137,11 +125,6 @@ def extract_response(text: str) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    """
-    EXTRAE EL GATEWAY:
-    1. Primero busca el campo etiquetado Gateway/Gate/Pasarela
-    2. Si no encuentra, busca palabras clave
-    """
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
@@ -153,16 +136,15 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS (con ┊ y ⌁ incluido)
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
-        # Limpiar y devolver
         gateway = clean_text(gateway)
         if not re.search(r'\d{14,16}', gateway):
             print(f"✅ Gateway (campo): {gateway}")
             return gateway
     
-    # 2. BUSCAR EN TODO EL TEXTO (palabras clave) - SOLO si no se encontró campo
+    # 2. BUSCAR EN TODO EL TEXTO (palabras clave)
     text_upper = text.upper()
     found_gateways = []
     for gw in GATEWAY_KEYWORDS:
@@ -210,8 +192,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    # AÑADIDO Estado, Estatus, R1
-    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘴", "Estado"])
+    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
     
     if status != "Not Found":
         status_upper = status.upper()
