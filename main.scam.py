@@ -38,8 +38,8 @@ def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
     cleaned = re.sub(r'^__\s*', '', text)
-    cleaned = re.sub(r'[\*\`"\']', '', cleaned)
-    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️〄]', '', cleaned)
+    cleaned = re.sub(r'[\*\`"\']', '', text)
+    cleaned = re.sub(r'[⚡💳✅✓♻️⚜️〄⪼]', '', cleaned)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
@@ -50,15 +50,17 @@ def normalize_text(text: str) -> str:
 
 def get_field_flexible(text: str, field_names: list) -> str:
     """Busca un campo en el texto con separadores comunes"""
-    separators = r'[:|»➸↠\-–—┊]'
+    # AÑADIDO ⌁ como separador
+    separators = r'[:|»➸↠\-–—┊⌁]'
     for field_name in field_names:
         patterns = [
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'{field_name}\s*:\s*([^\n\r]+)',
-            rf'{field_name}\s*[-»┊]\s*([^\n\r]+)',
+            rf'{field_name}\s*[-»┊⌁]\s*([^\n\r]+)',
             rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'〄\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'⪼\s*{field_name}\s*{separators}\s*([^\n\r]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -72,24 +74,26 @@ def extract_response(text: str) -> str:
     """
     CAPTURA TODOS LOS POSIBLES RESPONSES:
     - Response, Result, Message, Reply
+    - Respuesta (español)
     - R2, R3, R4, etc.
     - Price, Amount, Monto, Precio
     """
     text_norm = normalize_text(text)
     
-    # 1. BUSCAR Response, Result, Message (con separadores incluyendo ┊)
+    # 1. BUSCAR Response, Result, Message, Respuesta (con separadores incluyendo ┊ y ⌁)
     response_names = [
         "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
-        "RESPUESTA", "RESULTADO", "MENSAJE"
+        "RESPUESTA", "RESULTADO", "MENSAJE", "RESPONSE"
     ]
     
-    separators = r'[:|»➸↠\-–—┊]'
+    separators = r'[:|»➸↠\-–—┊⌁]'
     for name in response_names:
         patterns = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
-            rf'{name}\s*[-»┊]\s*([^\n\r]+)',
+            rf'{name}\s*[-»┊⌁]\s*([^\n\r]+)',
             rf'〄\s*{name}\s*{separators}\s*([^\n\r]+)',
+            rf'⪼\s*{name}\s*{separators}\s*([^\n\r]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -101,11 +105,11 @@ def extract_response(text: str) -> str:
     
     # 2. BUSCAR R2, R3, R4, etc.
     r_patterns = [
-        r'R2\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+        r'R2\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
         r'R2\s*:\s*([^\n\r]+)',
-        r'R3\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
-        r'R4\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
-        r'R\d+\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+        r'R3\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
+        r'R4\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
+        r'R\d+\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
     ]
     for pattern in r_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -119,7 +123,7 @@ def extract_response(text: str) -> str:
     price_names = ["PRICE", "AMOUNT", "MONTO", "PRECIO", "COST", "VALUE"]
     for name in price_names:
         patterns = [
-            rf'{name}\s*[:|»➸↠\-–—┊]\s*([^\n\r]+)',
+            rf'{name}\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
         ]
         for pattern in patterns:
@@ -149,7 +153,7 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS (con ┊ incluido)
+    # 1. BUSCAR EN CAMPOS ETIQUETADOS (con ┊ y ⌁ incluido)
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
         # Limpiar y devolver
@@ -183,8 +187,9 @@ def extract_card_info(text: str) -> dict | None:
     
     card_patterns = [
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'(?:CC|CARD)\s*[-»:┊]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'〄\s*Card\s*[┊:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'(?:CC|CARD|Tarjeta)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'〄\s*Card\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'⪼\s*Tarjeta\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
@@ -205,7 +210,8 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "STAT", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀"])
+    # AÑADIDO Estado, Estatus, R1
+    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘴", "Estado"])
     
     if status != "Not Found":
         status_upper = status.upper()
@@ -245,7 +251,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🚪 Gateway final: {gateway}")
 
     # ---------- EXTRAER BANK ----------
-    bank = get_field_flexible(text_clean, ["BANK", "BANCO"])
+    bank = get_field_flexible(text_clean, ["BANK", "BANCO", "Banco"])
     if bank == "Not Found":
         bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
         if bank == "Not Found":
@@ -253,7 +259,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
-    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS"])
+    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS", "Pais"])
     flag = "❓"
     if country != "Not Found":
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
@@ -267,7 +273,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data"])
+    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data", "Info"])
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
