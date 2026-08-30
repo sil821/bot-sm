@@ -37,7 +37,6 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 def clean_text(text: str) -> str:
     if not text:
         return "Not Found"
-    # Eliminar __ de CUALQUIER lugar (no solo al principio)
     cleaned = re.sub(r'__\s*', '', text)
     cleaned = re.sub(r'[\*\`"\']', '', cleaned)
     cleaned = re.sub(r'[⚡💳✅✓♻️⚜️〄⪼]', '', cleaned)
@@ -50,7 +49,6 @@ def normalize_text(text: str) -> str:
     return text
 
 def get_field_flexible(text: str, field_names: list) -> str:
-    """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—┊⌁]'
     for field_name in field_names:
         patterns = [
@@ -90,7 +88,6 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response ({name}): {result}")
                     return result
     
     r_patterns = [
@@ -105,22 +102,7 @@ def extract_response(text: str) -> str:
         if match:
             result = clean_text(match.group(1).strip())
             if result and len(result) > 0 and result != "$0.0":
-                print(f"✅ Response (R): {result}")
                 return result
-    
-    price_names = ["PRICE", "AMOUNT", "MONTO", "PRECIO", "COST", "VALUE"]
-    for name in price_names:
-        patterns = [
-            rf'{name}\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
-            rf'{name}\s*:\s*([^\n\r]+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
-                    print(f"✅ Response ({name}): {result}")
-                    return result
     
     return "Not Found"
 
@@ -136,15 +118,12 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
     ]
     
-    # 1. BUSCAR EN CAMPOS ETIQUETADOS
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
         gateway = clean_text(gateway)
         if not re.search(r'\d{14,16}', gateway):
-            print(f"✅ Gateway (campo): {gateway}")
             return gateway
     
-    # 2. BUSCAR EN TODO EL TEXTO (palabras clave)
     text_upper = text.upper()
     found_gateways = []
     for gw in GATEWAY_KEYWORDS:
@@ -152,9 +131,7 @@ def extract_gateway(text: str) -> str:
             found_gateways.append(gw)
     
     if found_gateways:
-        result = ' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]
-        print(f"✅ Gateway (palabras clave): {result}")
-        return result
+        return ' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]
     
     return "Not Found"
 
@@ -194,28 +171,36 @@ def extract_card_info(text: str) -> dict | None:
     # ---------- EXTRAER STATUS ----------
     status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
     
+    # ---------- FILTRADO: SOLO APPROVED/LIVE, NUNCA DECLINED ----------
     if status != "Not Found":
         status_upper = status.upper()
+        
+        # Palabras de éxito (permitidas)
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID']
+        # Palabras de rechazo (NO permitidas en STATUS)
+        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED']
         
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
         
+        # SI EL STATUS TIENE RECHAZO -> NO SE ENVÍA (se descarta)
         if has_reject:
-            print(f"❌ MENSAJE RECHAZADO - Status: {status}")
+            print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
             return None
         
+        # SI EL STATUS TIENE ÉXITO -> SE ENVÍA
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
+            # Si no tiene éxito pero tampoco rechazo, verificar LIVE/APPROVED en el texto
             if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
-                print("❌ No se encontró LIVE/APPROVED")
+                print("❌ No se encontró LIVE/APPROVED en el texto")
                 return None
     else:
+        # Si no hay campo Status, buscar en el texto general
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
-            print("✅ LIVE/APPROVED encontrado")
+            print("✅ LIVE/APPROVED encontrado en el texto")
             status = "Live ✓" if "LIVE" in text_upper else "Approved ✓"
         else:
             print("❌ No se encontró LIVE ni APPROVED")
