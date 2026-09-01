@@ -44,12 +44,18 @@ def clean_text(text: str) -> str:
     return cleaned
 
 def normalize_text(text: str) -> str:
+    """Convierte caracteres UNICODE a ASCII normal (ej: 𝑺𝒕𝒂𝒕𝒖𝒔 -> Status)"""
     text = unicodedata.normalize('NFKD', text)
     text = text.encode('ASCII', 'ignore').decode('ASCII')
     return text
 
 def get_field_flexible(text: str, field_names: list) -> str:
+    """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—┊⌁]'
+    
+    # Normalizar texto para buscar caracteres UNICODE
+    text_norm = normalize_text(text)
+    
     for field_name in field_names:
         patterns = [
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
@@ -60,12 +66,26 @@ def get_field_flexible(text: str, field_names: list) -> str:
             rf'〄\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⪼\s*{field_name}\s*{separators}\s*([^\n\r]+)',
         ]
+        # Buscar en texto original
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0:
                     return result
+        
+        # Buscar en texto normalizado (para caracteres UNICODE como 𝑺𝒕𝒂𝒕𝒖𝒔)
+        for pattern in patterns:
+            # Reemplazar field_name por su versión normalizada
+            pattern_norm = pattern
+            match = re.search(pattern_norm, text_norm, re.IGNORECASE)
+            if match:
+                # El resultado lo tomamos del texto original para mantener formato
+                # Pero buscamos la posición en el texto original
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0:
+                    return result
+    
     return "Not Found"
 
 def extract_response(text: str) -> str:
@@ -74,17 +94,31 @@ def extract_response(text: str) -> str:
         "RESPUESTA", "RESULTADO", "MENSAJE"
     ]
     
+    # Normalizar texto para buscar caracteres UNICODE
+    text_norm = normalize_text(text)
     separators = r'[:|»➸↠\-–—┊⌁]'
+    
     for name in response_names:
         patterns = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
             rf'{name}\s*[-»┊⌁]\s*([^\n\r]+)',
+            rf'⚜️\s*{name}\s*{separators}\s*([^\n\r]+)',
+            rf'⚡\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'〄\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'⪼\s*{name}\s*{separators}\s*([^\n\r]+)',
         ]
+        # Buscar en texto original
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    return result
+        
+        # Buscar en texto normalizado
+        for pattern in patterns:
+            match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0":
@@ -115,7 +149,7 @@ def extract_gateway(text: str) -> str:
         'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
         'REALEX', 'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
         'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
-        'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE'
+        'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE', 'RIN'
     ]
     
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
@@ -125,10 +159,13 @@ def extract_gateway(text: str) -> str:
             return gateway
     
     text_upper = text.upper()
+    text_norm = normalize_text(text).upper()
+    
     found_gateways = []
     for gw in GATEWAY_KEYWORDS:
-        if gw in text_upper and gw not in found_gateways:
-            found_gateways.append(gw)
+        if gw in text_upper or gw in text_norm:
+            if gw not in found_gateways:
+                found_gateways.append(gw)
     
     if found_gateways:
         return ' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]
@@ -149,6 +186,7 @@ def extract_card_info(text: str) -> dict | None:
         r'(?:CC|CARD|Tarjeta)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'〄\s*Card\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'⪼\s*Tarjeta\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'⚜️\s*CC\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
@@ -171,33 +209,25 @@ def extract_card_info(text: str) -> dict | None:
     # ---------- EXTRAER STATUS ----------
     status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
     
-    # ---------- FILTRADO: SOLO APPROVED/LIVE, NUNCA DECLINED ----------
     if status != "Not Found":
         status_upper = status.upper()
-        
-        # Palabras de éxito (permitidas)
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        # Palabras de rechazo (NO permitidas en STATUS)
         reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED']
         
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
         
-        # SI EL STATUS TIENE RECHAZO -> NO SE ENVÍA (se descarta)
         if has_reject:
             print(f"❌ MENSAJE RECHAZADO - Status contiene rechazo: {status}")
             return None
         
-        # SI EL STATUS TIENE ÉXITO -> SE ENVÍA
         if has_success:
             print(f"✅ MENSAJE APROBADO - Status: {status}")
         else:
-            # Si no tiene éxito pero tampoco rechazo, verificar LIVE/APPROVED en el texto
             if "LIVE" not in text_clean.upper() and "APPROVED" not in text_clean.upper():
                 print("❌ No se encontró LIVE/APPROVED en el texto")
                 return None
     else:
-        # Si no hay campo Status, buscar en el texto general
         text_upper = text_clean.upper()
         if "LIVE" in text_upper or "APPROVED" in text_upper:
             print("✅ LIVE/APPROVED encontrado en el texto")
@@ -217,7 +247,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🚪 Gateway final: {gateway}")
 
     # ---------- EXTRAER BANK ----------
-    bank = get_field_flexible(text_clean, ["BANK", "BANCO", "Banco"])
+    bank = get_field_flexible(text_clean, ["BANK", "BANCO", "Banco", "𝑩𝒂𝒏𝒌", "𝐁𝐚𝐧𝐤", "𝗕𝗮𝗻𝗸"])
     if bank == "Not Found":
         bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
         if bank == "Not Found":
@@ -225,7 +255,7 @@ def extract_card_info(text: str) -> dict | None:
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
-    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS", "Pais"])
+    country = get_field_flexible(text_clean, ["COUNTRY", "PAIS", "Pais", "𝑪𝒐𝒖𝒏𝒕𝒓𝒚", "𝐂𝐨𝐮𝐧𝐭𝐫𝐲", "𝗖𝗼𝘂𝗻𝘁𝗿𝘆"])
     flag = "❓"
     if country != "Not Found":
         flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
@@ -239,7 +269,7 @@ def extract_card_info(text: str) -> dict | None:
     card_type = "Unknown"
     level = "Unknown"
     
-    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data", "Info"])
+    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data", "Info", "𝑰𝒏𝒇𝒐", "𝐈𝐧𝐟𝐨", "𝗜𝗻𝗳𝗼"])
     if bin_info != "Not Found":
         parts = [p.strip() for p in bin_info.split('-') if p.strip()]
         if len(parts) >= 3:
