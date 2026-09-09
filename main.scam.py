@@ -44,16 +44,12 @@ def clean_text(text: str) -> str:
     return cleaned
 
 def normalize_text(text: str) -> str:
-    """Convierte caracteres UNICODE a ASCII normal (ej: 𝑺𝒕𝒂𝒕𝒖𝒔 -> Status)"""
     text = unicodedata.normalize('NFKD', text)
     text = text.encode('ASCII', 'ignore').decode('ASCII')
     return text
 
 def get_field_flexible(text: str, field_names: list) -> str:
-    """Busca un campo en el texto con separadores comunes"""
     separators = r'[:|»➸↠\-–—┊⌁]'
-    
-    # Normalizar texto para buscar caracteres UNICODE
     text_norm = normalize_text(text)
     
     for field_name in field_names:
@@ -65,8 +61,8 @@ def get_field_flexible(text: str, field_names: list) -> str:
             rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'〄\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⪼\s*{field_name}\s*{separators}\s*([^\n\r]+)',
+            rf'🔐\s*{field_name}\s*{separators}\s*([^\n\r]+)',
         ]
-        # Buscar en texto original
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -74,14 +70,9 @@ def get_field_flexible(text: str, field_names: list) -> str:
                 if result and len(result) > 0:
                     return result
         
-        # Buscar en texto normalizado (para caracteres UNICODE como 𝑺𝒕𝒂𝒕𝒖𝒔)
         for pattern in patterns:
-            # Reemplazar field_name por su versión normalizada
-            pattern_norm = pattern
-            match = re.search(pattern_norm, text_norm, re.IGNORECASE)
+            match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
-                # El resultado lo tomamos del texto original para mantener formato
-                # Pero buscamos la posición en el texto original
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0:
                     return result
@@ -89,12 +80,12 @@ def get_field_flexible(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_response(text: str) -> str:
+    # Buscar R1, Response, Result, etc.
     response_names = [
         "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
-        "RESPUESTA", "RESULTADO", "MENSAJE"
+        "RESPUESTA", "RESULTADO", "MENSAJE", "R1"
     ]
     
-    # Normalizar texto para buscar caracteres UNICODE
     text_norm = normalize_text(text)
     separators = r'[:|»➸↠\-–—┊⌁]'
     
@@ -107,8 +98,8 @@ def extract_response(text: str) -> str:
             rf'⚡\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'〄\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'⪼\s*{name}\s*{separators}\s*([^\n\r]+)',
+            rf'🔐\s*{name}\s*{separators}\s*([^\n\r]+)',
         ]
-        # Buscar en texto original
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -116,27 +107,12 @@ def extract_response(text: str) -> str:
                 if result and len(result) > 0 and result != "$0.0":
                     return result
         
-        # Buscar en texto normalizado
         for pattern in patterns:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0":
                     return result
-    
-    r_patterns = [
-        r'R2\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
-        r'R2\s*:\s*([^\n\r]+)',
-        r'R3\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
-        r'R4\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
-        r'R\d+\s*[:|»➸↠\-–—┊⌁]\s*([^\n\r]+)',
-    ]
-    for pattern in r_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            result = clean_text(match.group(1).strip())
-            if result and len(result) > 0 and result != "$0.0":
-                return result
     
     return "Not Found"
 
@@ -152,15 +128,27 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE', 'RIN'
     ]
     
+    # 1. Buscar en el título (primera línea) - ej: "( 伊列哈 ) | #Braintree ~ Auth ( 💎 )"
+    first_line = text.split('\n')[0] if text else ""
+    for gw in GATEWAY_KEYWORDS:
+        if gw in first_line.upper():
+            # Extraer el gateway completo de la primera línea
+            match = re.search(r'#([A-Za-z]+)\s*~\s*([A-Za-z]+)', first_line, re.IGNORECASE)
+            if match:
+                return f"{match.group(1).strip()} | {match.group(2).strip()}"
+            # Si no, devolver solo la palabra clave
+            return gw
+    
+    # 2. Buscar en campos etiquetados
     gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     if gateway != "Not Found":
         gateway = clean_text(gateway)
         if not re.search(r'\d{14,16}', gateway):
             return gateway
     
+    # 3. Buscar palabras clave en el texto
     text_upper = text.upper()
     text_norm = normalize_text(text).upper()
-    
     found_gateways = []
     for gw in GATEWAY_KEYWORDS:
         if gw in text_upper or gw in text_norm:
@@ -183,10 +171,11 @@ def extract_card_info(text: str) -> dict | None:
     
     card_patterns = [
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'(?:CC|CARD|Tarjeta)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'(?:CC|CARD|Tarjeta|QUERY)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'〄\s*Card\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'⪼\s*Tarjeta\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'⚜️\s*CC\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'🔐\s*QUERY\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'(\d{14,16})\s*-\s*(\d{1,2})\s*-\s*(\d{2,4})\s*-\s*(\d{3,4})',
         r'(\d{14,16})\s*/\s*(\d{1,2})\s*/\s*(\d{2,4})\s*/\s*(\d{3,4})',
     ]
@@ -207,7 +196,8 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    status = get_field_flexible(text_clean, ["STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
+    # Buscar S1, Status, Estado, etc.
+    status = get_field_flexible(text_clean, ["S1", "STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
     
     if status != "Not Found":
         status_upper = status.upper()
@@ -369,8 +359,10 @@ async def handler(event):
 
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
+        # PLANTILLA: [#B + BIN] (sin el 0 del BIN)
+        bin_short = card_data['bin_number'].lstrip('0')
         custom_message = f"""
-✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{card_data['bin_number']}]
+✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#B{bin_short}]
 
 ✦  |  𝗖𝗖 →  <code>{card_data['card_info']}</code>  
 ✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data['status']}
