@@ -178,7 +178,6 @@ def extract_response(text: str) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
-    # SIN 'GATE' NI 'GATEWAY' en la lista para evitar falsos positivos
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'CHECKER',
@@ -199,9 +198,10 @@ def extract_gateway(text: str) -> str:
             gate = "Not Found"
     
     if gate != "Not Found":
-        # SIEMPRE combinar con TYPE si existe
         if type_field != "Not Found":
             type_clean = clean_text(type_field).strip().upper()
+            # 🔥 LIMPIAR: coger solo la primera palabra del TYPE (antes de | o GATE)
+            type_clean = re.split(r'\s*[|]\s*|\s+GATE\s*[:|]|\s+GATEWAY\s*[:|]', type_clean)[0].strip()
             if type_clean and len(type_clean) < 20 and not re.search(r'\d{14,16}', type_clean):
                 return f"{gate} {type_clean}"
         return gate
