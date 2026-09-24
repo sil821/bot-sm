@@ -178,15 +178,16 @@ def extract_response(text: str) -> str:
     return "Not Found"
 
 def extract_gateway(text: str) -> str:
+    # SIN 'GATE' NI 'GATEWAY' en la lista para evitar falsos positivos
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
-        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'GATEWAY', 'CHECKER',
+        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'CHECKER',
         'CHK', 'PLUG', 'VITAL', 'AUTHORIZE', 'AUTHORIZED', 'ATREUS',
         '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
         'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
         'REALEX', 'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
         'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
-        'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE', 'RIN'
+        'PASARELA', 'PAYMENT', 'RIN'
     ]
     
     gate = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
@@ -198,7 +199,7 @@ def extract_gateway(text: str) -> str:
             gate = "Not Found"
     
     if gate != "Not Found":
-        # SIEMPRE combinar con TYPE si existe (sin importar qué valor tenga)
+        # SIEMPRE combinar con TYPE si existe
         if type_field != "Not Found":
             type_clean = clean_text(type_field).strip().upper()
             if type_clean and len(type_clean) < 20 and not re.search(r'\d{14,16}', type_clean):
@@ -265,7 +266,14 @@ def extract_card_info(text: str) -> dict | None:
     if status != "Not Found":
         status_upper = status.upper()
         success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED']
+        reject_words = [
+            'DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED',
+            'INVALID', 'BANNED', 'BLOCKED', 'RETRY', 'RETAIN', 'TRY AGAIN',
+            'TIMEOUT', 'CANCELED', 'CANCELLED', 'UNABLE', 'INCORRECT',
+            'INCORRECT_CVV', 'INCORRECT CVV', 'CALL', 'REFER', 'STOLEN',
+            'LOST', 'RESTRICTED', 'FRAUD', 'PICKUP', 'HOLD', 'SUSPENDED',
+            'NOT_PERMITTED', 'NOT PERMITTED', 'DO_NOT_HONOR', 'DO NOT HONOR'
+        ]
         
         has_success = any(word in status_upper for word in success_words)
         has_reject = any(word in status_upper for word in reject_words)
