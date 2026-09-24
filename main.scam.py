@@ -57,6 +57,7 @@ def get_field_flexible(text: str, field_names: list) -> str:
             rf'{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'{field_name}\s*:\s*([^\n\r]+)',
             rf'{field_name}\s*[-»┊⌁]\s*([^\n\r]+)',
+            rf'\|\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚜️\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'⚡\s*{field_name}\s*{separators}\s*([^\n\r]+)',
             rf'〄\s*{field_name}\s*{separators}\s*([^\n\r]+)',
@@ -80,9 +81,8 @@ def get_field_flexible(text: str, field_names: list) -> str:
     return "Not Found"
 
 def extract_response(text: str) -> str:
-    # Buscar R1, Response, Result, etc.
     response_names = [
-        "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
+        "R2", "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
         "RESPUESTA", "RESULTADO", "MENSAJE", "R1"
     ]
     
@@ -128,25 +128,29 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'CHECKOUT', 'PAYMENT', 'GATE', 'RIN'
     ]
     
-    # 1. Buscar en el título (primera línea) - ej: "( 伊列哈 ) | #Braintree ~ Auth ( 💎 )"
+    gate = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
+    type_field = get_field_flexible(text, ["TYPE", "TIPO"])
+    
+    if gate != "Not Found":
+        gate = clean_text(gate)
+        if re.search(r'\d{14,16}', gate):
+            gate = "Not Found"
+    
+    if gate != "Not Found":
+        if type_field != "Not Found":
+            type_clean = clean_text(type_field).strip()
+            if type_clean.upper() in ['CCN', 'AUTH', 'CHARGE', 'CHARGED', 'AUTHORIZED', 'SALE', 'PREAUTH']:
+                return f"{gate} {type_clean}"
+        return gate
+    
     first_line = text.split('\n')[0] if text else ""
     for gw in GATEWAY_KEYWORDS:
         if gw in first_line.upper():
-            # Extraer el gateway completo de la primera línea
             match = re.search(r'#([A-Za-z]+)\s*~\s*([A-Za-z]+)', first_line, re.IGNORECASE)
             if match:
                 return f"{match.group(1).strip()} | {match.group(2).strip()}"
-            # Si no, devolver solo la palabra clave
             return gw
     
-    # 2. Buscar en campos etiquetados
-    gateway = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
-    if gateway != "Not Found":
-        gateway = clean_text(gateway)
-        if not re.search(r'\d{14,16}', gateway):
-            return gateway
-    
-    # 3. Buscar palabras clave en el texto
     text_upper = text.upper()
     text_norm = normalize_text(text).upper()
     found_gateways = []
@@ -166,12 +170,11 @@ def extract_card_info(text: str) -> dict | None:
     print(text[:500] + "..." if len(text) > 500 else text)
     print("="*60)
     
-    # ---------- EXTRAER TARJETA ----------
     text_clean = re.sub(r'\|\|([^|]+)\|\|', r'\1', text)
     
     card_patterns = [
         r'(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
-        r'(?:CC|CARD|Tarjeta|QUERY)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
+        r'(?:CC|CARD|Tarjeta|QUERY|IN)\s*[-»:┊⌁]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'〄\s*Card\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'⪼\s*Tarjeta\s*[┊⌁:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
         r'⚜️\s*CC\s*[-»:]\s*(\d{14,16})\s*[|:]\s*(\d{1,2})\s*[|:]\s*(\d{2,4})\s*[|:]\s*(\d{3,4})',
@@ -196,7 +199,6 @@ def extract_card_info(text: str) -> dict | None:
     print(f"💳 Tarjeta: {card_info}")
 
     # ---------- EXTRAER STATUS ----------
-    # Buscar S1, Status, Estado, etc.
     status = get_field_flexible(text_clean, ["S1", "STATUS", "ESTADO", "ESTATUS", "STAT", "R1", "𝑺𝒕𝒂𝒕𝒖𝒔", "𝐒𝐭𝐚𝐭𝐮𝐬", "𝗦𝘁𝗮𝘁𝘂𝘀", "Estado"])
     
     if status != "Not Found":
@@ -238,10 +240,6 @@ def extract_card_info(text: str) -> dict | None:
 
     # ---------- EXTRAER BANK ----------
     bank = get_field_flexible(text_clean, ["BANK", "BANCO", "Banco", "𝑩𝒂𝒏𝒌", "𝐁𝐚𝐧𝐤", "𝗕𝗮𝗻𝗸"])
-    if bank == "Not Found":
-        bank = get_field_flexible(text_clean, ["BIN INFO", "INFO"])
-        if bank == "Not Found":
-            bank = get_field_flexible(text_clean, ["Data"])
     print(f"🏦 Bank: {bank}")
 
     # ---------- EXTRAER COUNTRY ----------
@@ -254,30 +252,17 @@ def extract_card_info(text: str) -> dict | None:
             country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
     print(f"🌍 Country: {country} {flag}")
 
-    # ---------- EXTRAER BRAND, TYPE, LEVEL ----------
-    brand = "Unknown"
-    card_type = "Unknown"
-    level = "Unknown"
+    # ---------- EXTRAER INFO (CARD INFO) ----------
+    # INFO: Mastercard - Debit - Standard -> Esto es la CARD INFO
+    info_field = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data", "Info", "𝑰𝒏𝒇𝒐", "𝐈𝐧𝐟𝐨", "𝗜𝗻𝗳𝗼"])
     
-    bin_info = get_field_flexible(text_clean, ["BIN INFO", "INFO", "Data", "Info", "𝑰𝒏𝒇𝒐", "𝐈𝐧𝐟𝐨", "𝗜𝗻𝗳𝗼"])
-    if bin_info != "Not Found":
-        parts = [p.strip() for p in bin_info.split('-') if p.strip()]
-        if len(parts) >= 3:
-            card_type = clean_text(parts[0])
-            brand = clean_text(parts[1])
-            level = clean_text(parts[2])
-        elif len(parts) >= 2:
-            card_type = clean_text(parts[0])
-            brand = clean_text(parts[1])
+    # CARD INFO = INFO del mensaje (Mastercard - Debit - Standard)
+    if info_field != "Not Found":
+        card_info_field = clean_text(info_field)
+    else:
+        card_info_field = "Not Found"
     
-    if brand == "Unknown":
-        brand = get_field_flexible(text_clean, ["BRAND"])
-    if card_type == "Unknown":
-        card_type = get_field_flexible(text_clean, ["TYPE"])
-    if level == "Unknown":
-        level = get_field_flexible(text_clean, ["LEVEL"])
-    
-    print(f"🏷️ Brand: {brand}, Type: {card_type}, Level: {level}")
+    print(f"💳 Card Info: {card_info_field}")
 
     return {
         "card_info": card_info,
@@ -285,9 +270,7 @@ def extract_card_info(text: str) -> dict | None:
         "status": status,
         "response": response,
         "gateway": gateway,
-        "brand": brand,
-        "type": card_type,
-        "level": level,
+        "card_info_field": card_info_field,  # NUEVO: INFO
         "bank": bank,
         "country": country,
         "flag": flag,
@@ -344,22 +327,26 @@ async def handler(event):
 
     try:
         bin_info = await get_bin_info(card_data['bin_number'])
-        if bin_info.get('brand') and bin_info['brand'] != 'N/A':
-            card_data['brand'] = clean_text(bin_info['brand'])
-        if bin_info.get('type') and bin_info['type'] != 'N/A':
-            card_data['type'] = clean_text(bin_info['type'])
-        if bin_info.get('level') and bin_info['level'] != 'N/A':
-            card_data['level'] = clean_text(bin_info['level'])
-        if bin_info.get('bank') and bin_info['bank'] != 'N/A':
-            card_data['bank'] = clean_text(bin_info['bank'])
-        if bin_info.get('country_name') and bin_info['country_name'] != 'N/A':
-            card_data['country'] = clean_text(bin_info['country_name'])
-        if bin_info.get('country_flag') and bin_info['country_flag'] != '❓':
-            card_data['flag'] = bin_info['country_flag']
+        # Solo usamos la API si el mensaje NO tiene INFO
+        if card_data['card_info_field'] == "Not Found":
+            # Construir INFO desde la API
+            brand = clean_text(bin_info.get('brand', 'Unknown'))
+            type_api = clean_text(bin_info.get('type', 'Unknown'))
+            level_api = clean_text(bin_info.get('level', 'Unknown'))
+            card_data['card_info_field'] = f"{brand} - {type_api} - {level_api}"
+        
+        # Solo usar BANK del mensaje, NO de la API
+        # El bank ya está extraído del mensaje correctamente
+        
+        # Si el country está vacío, usar el de la API
+        if card_data['country'] == "Not Found" or not card_data['country']:
+            if bin_info.get('country_name') and bin_info['country_name'] != 'N/A':
+                card_data['country'] = clean_text(bin_info['country_name'])
+            if bin_info.get('country_flag') and bin_info['country_flag'] != '❓':
+                card_data['flag'] = bin_info['country_flag']
 
         ext1, ext2, ext3 = generate_extrapolated(card_full)
 
-        # PLANTILLA: [#B + BIN] (sin el 0 del BIN)
         bin_short = card_data['bin_number'].lstrip('0')
         custom_message = f"""
 ✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#B{bin_short}]
@@ -371,8 +358,8 @@ async def handler(event):
 
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 ⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {card_data['response']}
-⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['bank']}
-⊹    |  𝗕𝗔𝗡𝗞 → {card_data['brand']}
+⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['card_info_field']}
+⊹    |  𝗕𝗔𝗡𝗞 → {card_data['bank']}
 ⊹    |  𝗖𝗢𝗨𝗡𝗧𝗥𝗬 → {card_data['country']} [{card_data['flag']}]
  
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
