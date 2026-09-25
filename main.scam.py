@@ -151,7 +151,8 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁]'
     
     for name in response_names:
-        patterns = [
+        # Patrón 1: valor en la MISMA línea
+        patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
             rf'{name}\s*[-»┊⌁]\s*([^\n\r]+)',
@@ -161,14 +162,33 @@ def extract_response(text: str) -> str:
             rf'⪼\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'🔐\s*{name}\s*{separators}\s*([^\n\r]+)',
         ]
-        for pattern in patterns:
+        for pattern in patterns_misma_linea:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0":
                     return result
         
-        for pattern in patterns:
+        for pattern in patterns_misma_linea:
+            match = re.search(pattern, text_norm, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    return result
+        
+        # Patrón 2: valor en la SIGUIENTE línea (después de "Response:" y posible línea en blanco)
+        patterns_siguiente_linea = [
+            rf'{name}\s*{separators}\s*\n+\s*([^\n\r]+)',
+            rf'{name}\s*:\s*\n+\s*([^\n\r]+)',
+        ]
+        for pattern in patterns_siguiente_linea:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                result = clean_text(match.group(1).strip())
+                if result and len(result) > 0 and result != "$0.0":
+                    return result
+        
+        for pattern in patterns_siguiente_linea:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
