@@ -532,7 +532,14 @@ async def handler(event):
 
     msg: Message = event.message
     if not msg.text:
+        print("⚠️ Mensaje sin texto, ignorado")
         return
+
+    print("\n" + "="*70)
+    print("🔔 MENSAJE RECIBIDO")
+    print("="*70)
+    print(msg.text[:1000])
+    print("="*70)
 
     # ---------- DETECTAR SI ES MASS ----------
     all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', msg.text)
@@ -541,15 +548,15 @@ async def handler(event):
     print(f"🔍 CCs encontradas: {len(all_ccs)}, Es mass: {is_mass}")
     
     if is_mass:
-        print("\n" + "="*60)
-        print("📦 MASS DETECTADO - Procesando TODAS las tarjetas approved...")
-        print("="*60)
+        print("\n📦 MASS DETECTADO - Procesando...")
         
         gateway = extract_gateway(msg.text)
+        print(f"🚪 Gateway detectado: {gateway}")
         
         bank = get_field_flexible(msg.text, ["BANK", "BANCO", "Banco"])
         if bank != "Not Found":
             bank = bank.upper()
+        print(f"🏦 Bank: {bank}")
         
         country = get_field_flexible(msg.text, ["COUNTRY", "PAIS", "Pais"])
         flag = "❓"
@@ -562,22 +569,29 @@ async def handler(event):
             country = country.upper()
             if flag == "❓":
                 flag = get_flag_for_country(country)
+        print(f"🌍 Country: {country} {flag}")
         
         info_field = get_field_flexible(msg.text, ["BIN INFO", "INFO", "Data", "Info"])
         if info_field != "Not Found":
             info_field = info_field.upper().strip()
+        print(f"💳 Info: {info_field}")
         
         mass_cards = extract_mass_cards(msg.text)
-        print(f"🔍 Tarjetas APPROVED encontradas: {len(mass_cards)}")
+        print(f"🎯 Tarjetas APPROVED encontradas: {len(mass_cards)}")
         
-        for card in mass_cards:
+        if not mass_cards:
+            print("❌ NO SE ENCONTRARON TARJETAS EN EL MASS")
+            return
+        
+        for i, card in enumerate(mass_cards, 1):
+            print(f"\n--- Procesando card {i}/{len(mass_cards)}: {card['card_info']} ---")
             card_clean = re.sub(r'[\s|-]', '', card['card_info'])
             
             if card_clean in processed_cards:
-                print(f"⏭️ Tarjeta {card_clean} ya procesada")
+                print(f"⏭️ Ya procesada")
                 continue
             if card_clean in cards_in_progress:
-                print(f"⏳ Tarjeta {card_clean} en proceso")
+                print(f"⏳ En proceso")
                 continue
             
             cards_in_progress.add(card_clean)
@@ -595,6 +609,7 @@ async def handler(event):
             }
             
             success = await send_card_message(card_data, response_override=card['response'])
+            print(f"📤 Resultado envío: {success}")
             
             if success:
                 processed_cards.add(card_clean)
@@ -605,8 +620,10 @@ async def handler(event):
         return
     
     # ---------- MODO NORMAL (1 tarjeta) ----------
+    print("📄 Modo NORMAL (1 tarjeta)")
     card_data = extract_card_info(msg.text)
     if not card_data:
+        print("❌ extract_card_info devolvió None")
         return
 
     card_full = card_data['card_info']
@@ -623,6 +640,7 @@ async def handler(event):
 
     try:
         success = await send_card_message(card_data)
+        print(f"📤 Resultado envío: {success}")
         if success:
             processed_cards.add(card_clean)
     finally:
