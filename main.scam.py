@@ -241,9 +241,12 @@ def extract_mass_cards(text: str) -> list:
     mass_cards = []
     encontradas = set()
     
+    # ---------- LIMPIAR TEXTO: quitar **, __, ` que rompen los patrones ----------
+    text_limpio = text.replace('**', '').replace('__', '').replace('`', '')
+    
     # ---------- FORMATO TOXNE ([🇪🇸] CC \n [✅] Response) ----------
     pattern_toxne = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
-    matches = re.findall(pattern_toxne, text)
+    matches = re.findall(pattern_toxne, text_limpio)
     for match in matches:
         cc, month, year, cvv, emoji, response = match
         card_info = f"{cc}|{month}|{year}|{cvv}"
@@ -258,7 +261,7 @@ def extract_mass_cards(text: str) -> list:
     
     # ---------- FORMATO PAYEZZY / Card: + Status: + Response: ----------
     if not mass_cards:
-        texto = text.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
+        texto = text_limpio.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
         bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
         
         for bloque in bloques[1:]:
