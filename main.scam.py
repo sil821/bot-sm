@@ -586,7 +586,7 @@ async def handler(event):
 
 # ------------------- ARRANQUE CON RECONEXIÓN AUTOMÁTICA -------------------
 async def main():
-    while True:  # BUCLE INFINITO
+    while True:
         try:
             print("🚀 Iniciando cliente de Telegram...")
             
@@ -617,11 +617,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    while True:  # BUCLE INFINITO EXTERNO
+    while True:
         try:
             asyncio.run(main())
         except KeyboardInterrupt:
             print("🛑 Bot detenido manualmente")
             break
         except Exception as e:
-            print(f"❌ ERROR CRÍTICO:
+            print(f"❌ ERROR CRÍTICO: {e}")
+            print("🔄 Reiniciando en 15 segundos...")
+            time.sleep(15)
