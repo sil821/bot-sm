@@ -151,6 +151,7 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁]'
     
     for name in response_names:
+        # Patrón 1: valor en la MISMA línea
         patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
@@ -165,33 +166,45 @@ def extract_response(text: str) -> str:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
+                if result and len(result) > 0 and result != "$0.0" and result != ":":
                     return result
         
         for pattern in patterns_misma_linea:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
+                if result and len(result) > 0 and result != "$0.0" and result != ":":
                     return result
         
+        # Patrón 2: valor en la SIGUIENTE línea (permitiendo líneas vacías)
         patterns_siguiente_linea = [
-            rf'{name}\s*{separators}\s*\n[\s]*([^\n\r]+)',
-            rf'{name}\s*:\s*\n[\s]*([^\n\r]+)',
+            rf'{name}\s*{separators}\s*\n\s*([^\n\r]+)',
+            rf'{name}\s*:\s*\n\s*([^\n\r]+)',
         ]
         for pattern in patterns_siguiente_linea:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
+                if result and len(result) > 0 and result != "$0.0" and result != ":":
                     return result
         
         for pattern in patterns_siguiente_linea:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
-                if result and len(result) > 0 and result != "$0.0":
+                if result and len(result) > 0 and result != "$0.0" and result != ":":
                     return result
+        
+        # Patrón 3: BUSCAR EN TODAS LAS LÍNEAS después del campo
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if re.search(rf'\b{name}\b', line, re.IGNORECASE):
+                for j in range(i+1, min(i+4, len(lines))):
+                    candidate = lines[j].strip()
+                    if candidate and candidate != ":" and not re.match(r'^[:\-|»➸]+$', candidate):
+                        result = clean_text(candidate)
+                        if result and len(result) > 0 and result != ":":
+                            return result
     
     return "Not Found"
 
