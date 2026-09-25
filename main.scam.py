@@ -200,7 +200,7 @@ def extract_gateway(text: str) -> str:
     if gate != "Not Found":
         if type_field != "Not Found":
             type_clean = clean_text(type_field).strip().upper()
-            # 🔥 LIMPIAR: coger solo la primera palabra del TYPE (antes de | o GATE)
+            # Limpiar el TYPE: coger solo la primera palabra antes de | o GATE
             type_clean = re.split(r'\s*[|]\s*|\s+GATE\s*[:|]|\s+GATEWAY\s*[:|]', type_clean)[0].strip()
             if type_clean and len(type_clean) < 20 and not re.search(r'\d{14,16}', type_clean):
                 return f"{gate} {type_clean}"
@@ -226,6 +226,46 @@ def extract_gateway(text: str) -> str:
         return (' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]).upper()
     
     return "Not Found"
+
+def extract_mass_cards(text: str) -> list:
+    """
+    Extrae TODAS las tarjetas APPROVED de un mensaje MASS.
+    Retorna lista de dicts con cc, response, etc.
+    """
+    mass_cards = []
+    
+    # Patrón para detectar líneas como: [🇨🇦] 379240080157964|01|2029|8967
+    # Seguido de [✅] Card Approved ccn! o [❌] Declined Card
+    pattern = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
+    
+    matches = re.findall(pattern, text)
+    
+    if not matches:
+        # Intentar otro patrón sin banderas específicas
+        pattern2 = r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
+        matches = re.findall(pattern2, text)
+    
+    for match in matches:
+        cc = match[0]
+        month = match[1]
+        year = match[2]
+        cvv = match[3]
+        emoji = match[4]
+        response = clean_text(match[5].strip())
+        
+        # Solo incluir si es ✅
+        if emoji == '✅':
+            mass_cards.append({
+                "cc": cc,
+                "month": month,
+                "year": year,
+                "cvv": cvv,
+                "response": response,
+                "card_info": f"{cc}|{month}|{year}|{cvv}",
+                "bin_number": cc[:6]
+            })
+    
+    return mass_cards
 
 def extract_card_info(text: str) -> dict | None:
     print("\n" + "="*60)
@@ -369,74 +409,53 @@ async def get_bin_info(bin_number: str) -> dict:
     return {"brand": "N/A", "type": "N/A", "level": "N/A",
             "bank": "N/A", "country_name": "N/A", "country_flag": "❓"}
 
-# ------------------- MANEJADOR -------------------
-@client.on(events.NewMessage())
-@client.on(events.MessageEdited())
-async def handler(event):
-    global processed_cards, cards_in_progress
-
-    msg: Message = event.message
-    if not msg.text:
-        return
-
-    card_data = extract_card_info(msg.text)
-    if not card_data:
-        return
-
-    card_full = card_data['card_info']
-    card_clean = re.sub(r'[\s|-]', '', card_full)
-
-    if card_clean in processed_cards:
-        print(f"⏭️ Tarjeta {card_clean} ya procesada")
-        return
-    if card_clean in cards_in_progress:
-        print(f"⏳ Tarjeta {card_clean} en proceso")
-        return
-
-    cards_in_progress.add(card_clean)
-
+async def send_card_message(card_data: dict, response_override: str = None):
+    """Función auxiliar para enviar un mensaje de tarjeta al canal."""
     try:
         bin_info = await get_bin_info(card_data['bin_number'])
         
-        if card_data['card_info_field'] == "Not Found":
+        if card_data.get('card_info_field', "Not Found") == "Not Found":
             brand = clean_text(bin_info.get('brand', 'Unknown')).upper()
             type_api = clean_text(bin_info.get('type', 'Unknown')).upper()
             level_api = clean_text(bin_info.get('level', 'Unknown')).upper()
             card_data['card_info_field'] = f"{brand} - {type_api} - {level_api}"
         
-        if card_data['bank'] == "Not Found":
+        if card_data.get('bank', "Not Found") == "Not Found":
             if bin_info.get('bank') and bin_info['bank'] != 'N/A':
                 card_data['bank'] = clean_text(bin_info['bank']).upper()
         
-        if card_data['country'] == "Not Found" or not card_data['country']:
+        if card_data.get('country', "Not Found") == "Not Found" or not card_data.get('country'):
             if bin_info.get('country_name') and bin_info['country_name'] != 'N/A':
                 card_data['country'] = clean_text(bin_info['country_name']).upper()
-        if card_data['flag'] == "❓":
+        
+        if card_data.get('flag', "❓") == "❓":
             if bin_info.get('country_flag') and bin_info['country_flag'] != '❓':
                 card_data['flag'] = bin_info['country_flag']
             else:
-                card_data['flag'] = get_flag_for_country(card_data['country'])
+                card_data['flag'] = get_flag_for_country(card_data.get('country', ''))
 
-        ext1, ext2, ext3 = generate_extrapolated(card_full)
-
+        ext1, ext2, ext3 = generate_extrapolated(card_data['card_info'])
         bin_short = card_data['bin_number'].lstrip('0')
+        
+        response_final = response_override if response_override else card_data.get('response', 'Not Found')
+        
         custom_message = f"""
 ✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#B{bin_short}]
 
 ✦  |  𝗖𝗖 →  <code>{card_data['card_info']}</code>  
-✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data['status']}
-✦  |  𝗚𝗔𝗧𝗘𝗪𝗔𝗬 → {card_data['gateway']}    
+✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data.get('status', 'Approved ✓')}
+✦  |  𝗚𝗔𝗧𝗘𝗪𝗔𝗬 → {card_data.get('gateway', 'Not Found')}    
 ✦  |  𝗦𝗖𝗔𝗠 𝗗𝗔𝗧𝗘 → {time.strftime('%d - %m - %Y')}
 
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
-⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {card_data['response']}
+⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {response_final}
  ᨭ⠀ 𝗜𝗡𝗙𝗢   →  {card_data['card_info_field']}
  ᨭ⠀ 𝗕𝗔𝗡𝗞  →  {card_data['bank']}
  ᨭ⠀ 𝗖𝗢𝗨𝗡𝗧𝗥𝗬  →  {card_data['country']} {card_data['flag']}
  
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 
- 𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝖳𝖱𝖠𝖲
+ 𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝗧𝗥𝗔𝗦
 
 ⇢ <code>{ext1}</code>  
 ⇢ <code>{ext2}</code>   
@@ -459,9 +478,8 @@ async def handler(event):
                     reply_markup=keyboard,
                     parse_mode='HTML'
                 )
-                print(f"✅ Mensaje ENVIADO para tarjeta {card_clean}")
-                processed_cards.add(card_clean)
-                break
+                print(f"✅ Mensaje ENVIADO para tarjeta {card_data['card_info']}")
+                return True
             except telebot.apihelper.ApiException as e:
                 if 'Too Many Requests' in str(e):
                     await asyncio.sleep(5)
@@ -472,6 +490,110 @@ async def handler(event):
             except Exception as e:
                 print(f"❌ Error: {e}")
                 break
+        return False
+    except Exception as e:
+        print(f"❌ Error en send_card_message: {e}")
+        return False
+
+# ------------------- MANEJADOR -------------------
+@client.on(events.NewMessage())
+@client.on(events.MessageEdited())
+async def handler(event):
+    global processed_cards, cards_in_progress
+
+    msg: Message = event.message
+    if not msg.text:
+        return
+
+    # ---------- DETECTAR SI ES MASS ----------
+    text_upper = msg.text.upper()
+    is_mass = 'MASS' in text_upper and ('[✅]' in msg.text or '[❌]' in msg.text)
+    
+    if is_mass:
+        print("\n" + "="*60)
+        print("📦 MASS DETECTADO - Procesando TODAS las tarjetas approved...")
+        print("="*60)
+        
+        # Extraer gateway y demás datos generales del mass
+        gateway = extract_gateway(msg.text)
+        country = get_field_flexible(msg.text, ["COUNTRY", "PAIS", "Pais"])
+        flag = "❓"
+        if country != "Not Found":
+            flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
+            if flag_match:
+                flag = flag_match.group(1)
+                country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
+            country = country.upper()
+        
+        bank = get_field_flexible(msg.text, ["BANK", "BANCO", "Banco"])
+        if bank != "Not Found":
+            bank = bank.upper()
+        
+        info_field = get_field_flexible(msg.text, ["BIN INFO", "INFO", "Data", "Info"])
+        if info_field != "Not Found":
+            info_field = info_field.upper().strip()
+        
+        # Extraer TODAS las tarjetas approved del mass
+        mass_cards = extract_mass_cards(msg.text)
+        print(f"🔍 Tarjetas APPROVED encontradas: {len(mass_cards)}")
+        
+        for card in mass_cards:
+            card_clean = re.sub(r'[\s|-]', '', card['card_info'])
+            
+            if card_clean in processed_cards:
+                print(f"⏭️ Tarjeta {card_clean} ya procesada")
+                continue
+            if card_clean in cards_in_progress:
+                print(f"⏳ Tarjeta {card_clean} en proceso")
+                continue
+            
+            cards_in_progress.add(card_clean)
+            
+            card_data = {
+                "card_info": card['card_info'],
+                "bin_number": card['bin_number'],
+                "status": "Approved ✓",
+                "response": card['response'],
+                "gateway": gateway,
+                "card_info_field": info_field if info_field != "Not Found" else "Not Found",
+                "bank": bank if bank != "Not Found" else "Not Found",
+                "country": country if country != "Not Found" else "Not Found",
+                "flag": flag,
+            }
+            
+            success = await send_card_message(card_data, response_override=card['response'])
+            
+            if success:
+                processed_cards.add(card_clean)
+            
+            cards_in_progress.discard(card_clean)
+            
+            # Pequeña pausa entre mensajes para evitar rate limits
+            await asyncio.sleep(1.5)
+        
+        return
+    
+    # ---------- MODO NORMAL (1 tarjeta) ----------
+    card_data = extract_card_info(msg.text)
+    if not card_data:
+        return
+
+    card_full = card_data['card_info']
+    card_clean = re.sub(r'[\s|-]', '', card_full)
+
+    if card_clean in processed_cards:
+        print(f"⏭️ Tarjeta {card_clean} ya procesada")
+        return
+    if card_clean in cards_in_progress:
+        print(f"⏳ Tarjeta {card_clean} en proceso")
+        return
+
+    cards_in_progress.add(card_clean)
+
+    try:
+        success = await send_card_message(card_data)
+        if success:
+            processed_cards.add(card_clean)
     finally:
         cards_in_progress.discard(card_clean)
 
@@ -482,5 +604,4 @@ async def main():
     print("✅ ¡Bot en ejecución!")
     await client.run_until_disconnected()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+if
