@@ -200,7 +200,6 @@ def extract_gateway(text: str) -> str:
     if gate != "Not Found":
         if type_field != "Not Found":
             type_clean = clean_text(type_field).strip().upper()
-            # Limpiar el TYPE: coger solo la primera palabra antes de | o GATE
             type_clean = re.split(r'\s*[|]\s*|\s+GATE\s*[:|]|\s+GATEWAY\s*[:|]', type_clean)[0].strip()
             if type_clean and len(type_clean) < 20 and not re.search(r'\d{14,16}', type_clean):
                 return f"{gate} {type_clean}"
@@ -228,20 +227,13 @@ def extract_gateway(text: str) -> str:
     return "Not Found"
 
 def extract_mass_cards(text: str) -> list:
-    """
-    Extrae TODAS las tarjetas APPROVED de un mensaje MASS.
-    Retorna lista de dicts con cc, response, etc.
-    """
+    """Extrae TODAS las tarjetas APPROVED de un mensaje MASS."""
     mass_cards = []
     
-    # Patrón para detectar líneas como: [🇨🇦] 379240080157964|01|2029|8967
-    # Seguido de [✅] Card Approved ccn! o [❌] Declined Card
     pattern = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
-    
     matches = re.findall(pattern, text)
     
     if not matches:
-        # Intentar otro patrón sin banderas específicas
         pattern2 = r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
         matches = re.findall(pattern2, text)
     
@@ -253,7 +245,6 @@ def extract_mass_cards(text: str) -> list:
         emoji = match[4]
         response = clean_text(match[5].strip())
         
-        # Solo incluir si es ✅
         if emoji == '✅':
             mass_cards.append({
                 "cc": cc,
@@ -514,7 +505,6 @@ async def handler(event):
         print("📦 MASS DETECTADO - Procesando TODAS las tarjetas approved...")
         print("="*60)
         
-        # Extraer gateway y demás datos generales del mass
         gateway = extract_gateway(msg.text)
         country = get_field_flexible(msg.text, ["COUNTRY", "PAIS", "Pais"])
         flag = "❓"
@@ -533,7 +523,6 @@ async def handler(event):
         if info_field != "Not Found":
             info_field = info_field.upper().strip()
         
-        # Extraer TODAS las tarjetas approved del mass
         mass_cards = extract_mass_cards(msg.text)
         print(f"🔍 Tarjetas APPROVED encontradas: {len(mass_cards)}")
         
@@ -567,8 +556,6 @@ async def handler(event):
                 processed_cards.add(card_clean)
             
             cards_in_progress.discard(card_clean)
-            
-            # Pequeña pausa entre mensajes para evitar rate limits
             await asyncio.sleep(1.5)
         
         return
@@ -604,4 +591,5 @@ async def main():
     print("✅ ¡Bot en ejecución!")
     await client.run_until_disconnected()
 
-if
+if __name__ == "__main__":
+    asyncio.run(main())
