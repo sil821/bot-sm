@@ -189,14 +189,11 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'PAYMENT', 'RIN'
     ]
     
-    # ---------- DETECTAR GATEWAY DEL TÍTULO (formato [Nombre] [5$]) ----------
     first_line = text.split('\n')[0] if text else ""
-    # Ej: "𝗣𝗮𝘆𝗲𝘇𝘇𝘆 [5$]"
     title_gateway_match = re.search(r'^\s*([^\[]+?)\s*\[(\d+\$?)\]', first_line.strip(), re.IGNORECASE)
     if title_gateway_match:
         gateway_name = clean_text(title_gateway_match.group(1)).strip()
         price = title_gateway_match.group(2).strip()
-        # Solo si es texto (no solo números)
         if gateway_name and len(gateway_name) < 30 and not re.search(r'^\d+$', gateway_name):
             return f"{gateway_name} {price}".upper()
     
@@ -237,38 +234,50 @@ def extract_gateway(text: str) -> str:
     return "Not Found"
 
 def extract_mass_cards(text: str) -> list:
-    """Extrae TODAS las tarjetas APPROVED de un mensaje MASS (con [✅] seguido de Approved)."""
+    """
+    Extrae TODAS las tarjetas con STATUS Approved de un mensaje MASS.
+    """
     mass_cards = []
     
-    # Patrón para formato tipo [〄] Card: xxx + [〄] Status Approved! ✅ + [〄] Response Charged! [5$]
-    pattern = r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})[\s\S]*?Status\s*[:]?\s*Approved[\s\S]*?Response\s*[:]?\s*([^\n\r]+)'
-    matches = re.findall(pattern, text, re.IGNORECASE)
+    # Normalizar
+    texto = text.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
     
-    if not matches:
-        # Patrón alternativo con [〄]
-        pattern2 = r'\[〄\]\s*(?:Card|CC)\s*[:]?\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})[\s\S]*?\[〄\]\s*Status\s*[:]?\s*Approved[\s\S]*?\[〄\]\s*Response\s*[:]?\s*([^\n\r]+)'
-        matches = re.findall(pattern2, text, re.IGNORECASE)
+    # Dividir por "Card:" / "Card " / "CC:" / "Tarjeta:"
+    bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
     
-    if not matches:
-        # Patrón con [✅] (formato Toxne)
-        pattern3 = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
-        for match in re.findall(pattern3, text):
-            if match[4] == '✅':
-                mass_cards.append({
-                    "card_info": f"{match[0]}|{match[1]}|{match[2]}|{match[3]}",
-                    "bin_number": match[0][:6],
-                    "response": clean_text(match[5].strip()),
-                })
-        return mass_cards
-    
-    for match in matches:
-        card_info = f"{match[0]}|{match[1]}|{match[2]}|{match[3]}"
-        response = clean_text(match[4].strip())
+    for bloque in bloques[1:]:
+        cc_match = re.search(r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})', bloque)
+        if not cc_match:
+            continue
+        
+        cc = cc_match.group(1)
+        month = cc_match.group(2)
+        year = cc_match.group(3)
+        cvv = cc_match.group(4)
+        card_info = f"{cc}|{month}|{year}|{cvv}"
+        
+        # Buscar Status
+        status_match = re.search(r'(?:Status|Estado)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
+        status = status_match.group(1) if status_match else ""
+        
+        # Filtrar: solo si es Approved
+        status_upper = status.upper()
+        success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
+        
+        if not any(word in status_upper for word in success_words):
+            print(f"⏭️ Card {card_info} ignorada (status: {status.strip()})")
+            continue
+        
+        # Buscar Response
+        response_match = re.search(r'(?:Response|Respuesta|Result|Message)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
+        response = clean_text(response_match.group(1).strip()) if response_match else "Not Found"
+        
         mass_cards.append({
             "card_info": card_info,
-            "bin_number": match[0][:6],
+            "bin_number": cc[:6],
             "response": response,
         })
+        print(f"✅ MASS card detectada: {card_info} -> {response}")
     
     return mass_cards
 
@@ -510,11 +519,11 @@ async def handler(event):
     if not msg.text:
         return
 
-    # ---------- DETECTAR SI ES MASS (cualquier formato con múltiples cards approved) ----------
-    text_upper = msg.text.upper()
-    # Detectar si tiene múltiples CCs
+    # ---------- DETECTAR SI ES MASS ----------
     all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', msg.text)
     is_mass = len(all_ccs) > 1
+    
+    print(f"🔍 CCs encontradas: {len(all_ccs)}, Es mass: {is_mass}")
     
     if is_mass:
         print("\n" + "="*60)
@@ -523,7 +532,6 @@ async def handler(event):
         
         gateway = extract_gateway(msg.text)
         
-        # Extraer info general (Banco, Country, Data)
         bank = get_field_flexible(msg.text, ["BANK", "BANCO", "Banco"])
         if bank != "Not Found":
             bank = bank.upper()
