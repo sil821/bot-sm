@@ -167,14 +167,19 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    return result
+                    # 🔥 CORTAR en el primer caracter raro de separación
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    if result and len(result) > 0:
+                        return result
         
         for pattern in patterns_misma_linea:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    return result
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    if result and len(result) > 0:
+                        return result
         
         # Patrón 2: valor en la SIGUIENTE línea (permitiendo líneas vacías)
         patterns_siguiente_linea = [
@@ -186,14 +191,18 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    return result
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    if result and len(result) > 0:
+                        return result
         
         for pattern in patterns_siguiente_linea:
             match = re.search(pattern, text_norm, re.IGNORECASE)
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    return result
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    if result and len(result) > 0:
+                        return result
         
         # Patrón 3: BUSCAR EN TODAS LAS LÍNEAS después del campo
         lines = text.split('\n')
@@ -204,7 +213,10 @@ def extract_response(text: str) -> str:
                     if candidate and candidate != ":" and not re.match(r'^[:\-|»➸]+$', candidate):
                         result = clean_text(candidate)
                         if result and len(result) > 0 and result != ":":
-                            return result
+                            # 🔥 CORTAR en el primer caracter raro de separación
+                            result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                            if result and len(result) > 0:
+                                return result
     
     return "Not Found"
 
@@ -558,14 +570,12 @@ async def handler(event):
 
     msg: Message = event.message
     
-    # Obtener texto de varias formas (soporta replies/citados)
     texto_mensaje = msg.text or msg.raw_text or msg.message
     
     if not texto_mensaje:
         print("⚠️ Mensaje sin texto, ignorado")
         return
 
-    # Limpiar bloques de código markdown (```text```)
     texto_mensaje = re.sub(r'```[a-z]*\s*', '', texto_mensaje)
     texto_mensaje = texto_mensaje.replace('```', '')
 
