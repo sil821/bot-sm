@@ -151,7 +151,7 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁]'
     
     for name in response_names:
-        # Patrón 1: valor en la MISMA línea
+        # ---------- Patrón 1: valor en la MISMA línea ----------
         patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
@@ -176,10 +176,10 @@ def extract_response(text: str) -> str:
                 if result and len(result) > 0 and result != "$0.0":
                     return result
         
-        # Patrón 2: valor en la SIGUIENTE línea (después de "Response:" y posible línea en blanco)
+        # ---------- Patrón 2: valor en la SIGUIENTE línea (permitiendo líneas vacías) ----------
         patterns_siguiente_linea = [
-            rf'{name}\s*{separators}\s*\n+\s*([^\n\r]+)',
-            rf'{name}\s*:\s*\n+\s*([^\n\r]+)',
+            rf'{name}\s*{separators}\s*\n[\s]*([^\n\r]+)',
+            rf'{name}\s*:\s*\n[\s]*([^\n\r]+)',
         ]
         for pattern in patterns_siguiente_linea:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -254,17 +254,11 @@ def extract_gateway(text: str) -> str:
     return "Not Found"
 
 def extract_mass_cards(text: str) -> list:
-    """
-    Extrae TODAS las tarjetas con STATUS Approved de un mensaje MASS.
-    Soporta varios formatos: Payezzy, Toxne, etc.
-    """
     mass_cards = []
     encontradas = set()
     
-    # ---------- LIMPIAR TEXTO: quitar **, __, ` que rompen los patrones ----------
     text_limpio = text.replace('**', '').replace('__', '').replace('`', '')
     
-    # ---------- FORMATO TOXNE ([🇪🇸] CC \n [✅] Response) ----------
     pattern_toxne = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
     matches = re.findall(pattern_toxne, text_limpio)
     for match in matches:
@@ -279,7 +273,6 @@ def extract_mass_cards(text: str) -> list:
             encontradas.add(card_info)
             print(f"✅ TOXNE card detectada: {card_info} -> {response.strip()}")
     
-    # ---------- FORMATO PAYEZZY / Card: + Status: + Response: ----------
     if not mass_cards:
         texto = text_limpio.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
         bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
@@ -462,7 +455,6 @@ async def get_bin_info(bin_number: str) -> dict:
             "bank": "N/A", "country_name": "N/A", "country_flag": "❓"}
 
 async def send_card_message(card_data: dict, response_override: str = None):
-    """Función auxiliar para enviar un mensaje de tarjeta al canal."""
     try:
         bin_info = await get_bin_info(card_data['bin_number'])
         
@@ -564,7 +556,6 @@ async def handler(event):
     print(msg.text[:1000])
     print("="*70)
 
-    # ---------- DETECTAR SI ES MASS ----------
     all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', msg.text)
     is_mass = len(all_ccs) > 1
     
@@ -586,129 +577,4 @@ async def handler(event):
         if country != "Not Found":
             flag_match = re.search(r'([\U0001F1E6-\U0001F1FF]+)', country)
             if flag_match:
-                flag = flag_match.group(1)
-                country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
-            country = re.sub(r'\s*-\s*[A-Z]{2,3}\s*$', '', country).strip()
-            country = country.upper()
-            if flag == "❓":
-                flag = get_flag_for_country(country)
-        print(f"🌍 Country: {country} {flag}")
-        
-        info_field = get_field_flexible(msg.text, ["BIN INFO", "INFO", "Data", "Info"])
-        if info_field != "Not Found":
-            info_field = info_field.upper().strip()
-        print(f"💳 Info: {info_field}")
-        
-        mass_cards = extract_mass_cards(msg.text)
-        print(f"🎯 Tarjetas APPROVED encontradas: {len(mass_cards)}")
-        
-        if not mass_cards:
-            print("❌ NO SE ENCONTRARON TARJETAS EN EL MASS")
-            return
-        
-        for i, card in enumerate(mass_cards, 1):
-            print(f"\n--- Procesando card {i}/{len(mass_cards)}: {card['card_info']} ---")
-            card_clean = re.sub(r'[\s|-]', '', card['card_info'])
-            
-            if card_clean in processed_cards:
-                print(f"⏭️ Ya procesada")
-                continue
-            if card_clean in cards_in_progress:
-                print(f"⏳ En proceso")
-                continue
-            
-            cards_in_progress.add(card_clean)
-            
-            card_data = {
-                "card_info": card['card_info'],
-                "bin_number": card['bin_number'],
-                "status": "Approved ✓",
-                "response": card['response'],
-                "gateway": gateway,
-                "card_info_field": info_field if info_field != "Not Found" else "Not Found",
-                "bank": bank if bank != "Not Found" else "Not Found",
-                "country": country if country != "Not Found" else "Not Found",
-                "flag": flag,
-            }
-            
-            success = await send_card_message(card_data, response_override=card['response'])
-            print(f"📤 Resultado envío: {success}")
-            
-            if success:
-                processed_cards.add(card_clean)
-            
-            cards_in_progress.discard(card_clean)
-            await asyncio.sleep(1.5)
-        
-        return
-    
-    # ---------- MODO NORMAL (1 tarjeta) ----------
-    print("📄 Modo NORMAL (1 tarjeta)")
-    card_data = extract_card_info(msg.text)
-    if not card_data:
-        print("❌ extract_card_info devolvió None")
-        return
-
-    card_full = card_data['card_info']
-    card_clean = re.sub(r'[\s|-]', '', card_full)
-
-    if card_clean in processed_cards:
-        print(f"⏭️ Tarjeta {card_clean} ya procesada")
-        return
-    if card_clean in cards_in_progress:
-        print(f"⏳ Tarjeta {card_clean} en proceso")
-        return
-
-    cards_in_progress.add(card_clean)
-
-    try:
-        success = await send_card_message(card_data)
-        print(f"📤 Resultado envío: {success}")
-        if success:
-            processed_cards.add(card_clean)
-    finally:
-        cards_in_progress.discard(card_clean)
-
-# ------------------- ARRANQUE CON RECONEXIÓN AUTOMÁTICA -------------------
-async def main():
-    while True:
-        try:
-            print("🚀 Iniciando cliente de Telegram...")
-            
-            if not client.is_connected():
-                await client.connect()
-            
-            if not await client.is_user_authorized():
-                print("⚠️ Sesión no autorizada, iniciando...")
-                await client.start()
-            
-            print("✅ ¡Bot en ejecución! Escuchando mensajes...")
-            
-            await client.run_until_disconnected()
-            
-            print("⚠️ Cliente desconectado, reconectando...")
-            
-        except KeyboardInterrupt:
-            print("🛑 Bot detenido manualmente")
-            break
-        except asyncio.CancelledError:
-            print("🛑 Tarea cancelada")
-            break
-        except Exception as e:
-            print(f"❌ ERROR: {e}")
-            print("🔄 Reconectando en 10 segundos...")
-            await asyncio.sleep(10)
-            continue
-
-
-if __name__ == "__main__":
-    while True:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            print("🛑 Bot detenido manualmente")
-            break
-        except Exception as e:
-            print(f"❌ ERROR CRÍTICO: {e}")
-            print("🔄 Reiniciando en 15 segundos...")
-            time.sleep(15)
+                flag = flag
