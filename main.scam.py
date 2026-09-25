@@ -584,12 +584,44 @@ async def handler(event):
     finally:
         cards_in_progress.discard(card_clean)
 
-# ------------------- ARRANQUE -------------------
+# ------------------- ARRANQUE CON RECONEXIÓN AUTOMÁTICA -------------------
 async def main():
-    print("🚀 Iniciando cliente de Telegram...")
-    await client.start()
-    print("✅ ¡Bot en ejecución!")
-    await client.run_until_disconnected()
+    while True:  # BUCLE INFINITO
+        try:
+            print("🚀 Iniciando cliente de Telegram...")
+            
+            if not client.is_connected():
+                await client.connect()
+            
+            if not await client.is_user_authorized():
+                print("⚠️ Sesión no autorizada, iniciando...")
+                await client.start()
+            
+            print("✅ ¡Bot en ejecución! Escuchando mensajes...")
+            
+            await client.run_until_disconnected()
+            
+            print("⚠️ Cliente desconectado, reconectando...")
+            
+        except KeyboardInterrupt:
+            print("🛑 Bot detenido manualmente")
+            break
+        except asyncio.CancelledError:
+            print("🛑 Tarea cancelada")
+            break
+        except Exception as e:
+            print(f"❌ ERROR: {e}")
+            print("🔄 Reconectando en 10 segundos...")
+            await asyncio.sleep(10)
+            continue
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    while True:  # BUCLE INFINITO EXTERNO
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("🛑 Bot detenido manualmente")
+            break
+        except Exception as e:
+            print(f"❌ ERROR CRÍTICO:
