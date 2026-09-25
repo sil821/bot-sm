@@ -151,7 +151,6 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁]'
     
     for name in response_names:
-        # Patrón 1: valor en la MISMA línea
         patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
@@ -167,7 +166,6 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    # 🔥 CORTAR en el primer caracter raro de separación
                     result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
                     if result and len(result) > 0:
                         return result
@@ -181,7 +179,6 @@ def extract_response(text: str) -> str:
                     if result and len(result) > 0:
                         return result
         
-        # Patrón 2: valor en la SIGUIENTE línea (permitiendo líneas vacías)
         patterns_siguiente_linea = [
             rf'{name}\s*{separators}\s*\n\s*([^\n\r]+)',
             rf'{name}\s*:\s*\n\s*([^\n\r]+)',
@@ -204,7 +201,6 @@ def extract_response(text: str) -> str:
                     if result and len(result) > 0:
                         return result
         
-        # Patrón 3: BUSCAR EN TODAS LAS LÍNEAS después del campo
         lines = text.split('\n')
         for i, line in enumerate(lines):
             if re.search(rf'\b{name}\b', line, re.IGNORECASE):
@@ -213,7 +209,6 @@ def extract_response(text: str) -> str:
                     if candidate and candidate != ":" and not re.match(r'^[:\-|»➸]+$', candidate):
                         result = clean_text(candidate)
                         if result and len(result) > 0 and result != ":":
-                            # 🔥 CORTAR en el primer caracter raro de separación
                             result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
                             if result and len(result) > 0:
                                 return result
@@ -506,8 +501,9 @@ async def send_card_message(card_data: dict, response_override: str = None):
         
         response_final = response_override if response_override else card_data.get('response', 'Not Found')
         
+        # 🔥 PLANTILLA NUEVA
         custom_message = f"""
-✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#B{bin_short}]
+✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{bin_short}]
 
 ✦  |  𝗖𝗖 →  <code>{card_data['card_info']}</code>  
 ✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data.get('status', 'Approved ✓')}
@@ -516,17 +512,17 @@ async def send_card_message(card_data: dict, response_override: str = None):
 
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 ⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {response_final}
- ᨭ⠀ 𝗜𝗡𝗙𝗢   →  {card_data['card_info_field']}
- ᨭ⠀ 𝗕𝗔𝗡𝗞  →  {card_data['bank']}
- ᨭ⠀ 𝗖𝗢𝗨𝗡𝗧𝗥𝗬  →  {card_data['country']} {card_data['flag']}
+⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['bank']}
+⊹    |  𝗕𝗔𝗡𝗞 → {card_data.get('card_info_field', 'Unknown')}
+⊹    |  𝗖𝗢𝗨𝗡𝗧𝗥𝗬 → {card_data['country']} [{card_data['flag']}]
  
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 
- 𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝗧𝗥𝗔𝗦
+ 𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝖳𝖱𝖠𝖲
 
 ⇢ <code>{ext1}</code>  
-⇢ <code>{ext2}</code>   
-⇢ <code>{ext3}</code> 
+⇢  <code>{ext2}</code>  
+⇢  <code>{ext3}</code> 
 """
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton("𖥻 INFO", url="https://t.me/infocherrys"),
