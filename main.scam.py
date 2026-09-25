@@ -501,9 +501,8 @@ async def send_card_message(card_data: dict, response_override: str = None):
         
         response_final = response_override if response_override else card_data.get('response', 'Not Found')
         
-        # 🔥 PLANTILLA NUEVA
         custom_message = f"""
-✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#BIN{bin_short}]
+✸  𝗖𝗛𝗘𝗥𝗥𝗬'𝗦  𝗦𝗖𝗔𝗠  — [#B{bin_short}]
 
 ✦  |  𝗖𝗖 →  <code>{card_data['card_info']}</code>  
 ✦  |  𝗦𝗧𝗔𝗧𝗨𝗦 → {card_data.get('status', 'Approved ✓')}
@@ -512,8 +511,8 @@ async def send_card_message(card_data: dict, response_override: str = None):
 
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
 ⊹    |  𝗥𝗘𝗦𝗣𝗢𝗡𝗦𝗘 → {response_final}
-⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data['bank']}
-⊹    |  𝗕𝗔𝗡𝗞 → {card_data.get('card_info_field', 'Unknown')}
+⊹    |  𝗖𝗔𝗥𝗗 𝗜𝗡𝗙𝗢 → {card_data.get('card_info_field', 'Unknown')}
+⊹    |  𝗕𝗔𝗡𝗞 → {card_data['bank']}
 ⊹    |  𝗖𝗢𝗨𝗡𝗧𝗥𝗬 → {card_data['country']} [{card_data['flag']}]
  
 ︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶︶
