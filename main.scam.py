@@ -552,6 +552,10 @@ async def handler(event):
         print("⚠️ Mensaje sin texto, ignorado")
         return
 
+    # Limpiar bloques de código markdown (```text```)
+    texto_mensaje = re.sub(r'```[a-z]*\s*', '', texto_mensaje)
+    texto_mensaje = texto_mensaje.replace('```', '')
+
     print("\n" + "="*70)
     print("🔔 MENSAJE RECIBIDO")
     if msg.reply_to_msg_id:
