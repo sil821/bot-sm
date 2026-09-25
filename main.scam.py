@@ -236,48 +236,63 @@ def extract_gateway(text: str) -> str:
 def extract_mass_cards(text: str) -> list:
     """
     Extrae TODAS las tarjetas con STATUS Approved de un mensaje MASS.
+    Soporta varios formatos: Payezzy, Toxne, etc.
     """
     mass_cards = []
+    encontradas = set()
     
-    # Normalizar
-    texto = text.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
-    
-    # Dividir por "Card:" / "Card " / "CC:" / "Tarjeta:"
-    bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
-    
-    for bloque in bloques[1:]:
-        cc_match = re.search(r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})', bloque)
-        if not cc_match:
-            continue
-        
-        cc = cc_match.group(1)
-        month = cc_match.group(2)
-        year = cc_match.group(3)
-        cvv = cc_match.group(4)
+    # ---------- FORMATO TOXNE ([🇪🇸] CC \n [✅] Response) ----------
+    pattern_toxne = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
+    matches = re.findall(pattern_toxne, text)
+    for match in matches:
+        cc, month, year, cvv, emoji, response = match
         card_info = f"{cc}|{month}|{year}|{cvv}"
+        if emoji == '✅' and card_info not in encontradas:
+            mass_cards.append({
+                "card_info": card_info,
+                "bin_number": cc[:6],
+                "response": clean_text(response.strip()),
+            })
+            encontradas.add(card_info)
+            print(f"✅ TOXNE card detectada: {card_info} -> {response.strip()}")
+    
+    # ---------- FORMATO PAYEZZY / Card: + Status: + Response: ----------
+    if not mass_cards:
+        texto = text.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
+        bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
         
-        # Buscar Status
-        status_match = re.search(r'(?:Status|Estado)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
-        status = status_match.group(1) if status_match else ""
-        
-        # Filtrar: solo si es Approved
-        status_upper = status.upper()
-        success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
-        
-        if not any(word in status_upper for word in success_words):
-            print(f"⏭️ Card {card_info} ignorada (status: {status.strip()})")
-            continue
-        
-        # Buscar Response
-        response_match = re.search(r'(?:Response|Respuesta|Result|Message)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
-        response = clean_text(response_match.group(1).strip()) if response_match else "Not Found"
-        
-        mass_cards.append({
-            "card_info": card_info,
-            "bin_number": cc[:6],
-            "response": response,
-        })
-        print(f"✅ MASS card detectada: {card_info} -> {response}")
+        for bloque in bloques[1:]:
+            cc_match = re.search(r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})', bloque)
+            if not cc_match:
+                continue
+            
+            cc = cc_match.group(1)
+            month = cc_match.group(2)
+            year = cc_match.group(3)
+            cvv = cc_match.group(4)
+            card_info = f"{cc}|{month}|{year}|{cvv}"
+            
+            status_match = re.search(r'(?:Status|Estado)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
+            status = status_match.group(1) if status_match else ""
+            
+            status_upper = status.upper()
+            success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
+            
+            if not any(word in status_upper for word in success_words):
+                print(f"⏭️ Card {card_info} ignorada (status: {status.strip()})")
+                continue
+            
+            response_match = re.search(r'(?:Response|Respuesta|Result|Message)\s*[:]?\s*([^\n\r]+)', bloque, re.IGNORECASE)
+            response = clean_text(response_match.group(1).strip()) if response_match else "Not Found"
+            
+            if card_info not in encontradas:
+                mass_cards.append({
+                    "card_info": card_info,
+                    "bin_number": cc[:6],
+                    "response": response,
+                })
+                encontradas.add(card_info)
+                print(f"✅ PAYEZZY card detectada: {card_info} -> {response}")
     
     return mass_cards
 
