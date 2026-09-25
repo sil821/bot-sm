@@ -180,7 +180,7 @@ def extract_response(text: str) -> str:
 def extract_gateway(text: str) -> str:
     GATEWAY_KEYWORDS = [
         'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
-        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'CHECKER',
+        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'CHECKER', 'PAYEZZY',
         'CHK', 'PLUG', 'VITAL', 'AUTHORIZE', 'AUTHORIZED', 'ATREUS',
         '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
         'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
@@ -188,6 +188,17 @@ def extract_gateway(text: str) -> str:
         'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
         'PASARELA', 'PAYMENT', 'RIN'
     ]
+    
+    # ---------- DETECTAR GATEWAY DEL TÍTULO (formato [Nombre] [5$]) ----------
+    first_line = text.split('\n')[0] if text else ""
+    # Ej: "𝗣𝗮𝘆𝗲𝘇𝘇𝘆 [5$]"
+    title_gateway_match = re.search(r'^\s*([^\[]+?)\s*\[(\d+\$?)\]', first_line.strip(), re.IGNORECASE)
+    if title_gateway_match:
+        gateway_name = clean_text(title_gateway_match.group(1)).strip()
+        price = title_gateway_match.group(2).strip()
+        # Solo si es texto (no solo números)
+        if gateway_name and len(gateway_name) < 30 and not re.search(r'^\d+$', gateway_name):
+            return f"{gateway_name} {price}".upper()
     
     gate = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     type_field = get_field_flexible(text, ["TYPE", "TIPO"])
@@ -205,7 +216,6 @@ def extract_gateway(text: str) -> str:
                 return f"{gate} {type_clean}"
         return gate
     
-    first_line = text.split('\n')[0] if text else ""
     for gw in GATEWAY_KEYWORDS:
         if gw in first_line.upper():
             match = re.search(r'#([A-Za-z]+)\s*~\s*([A-Za-z]+)', first_line, re.IGNORECASE)
@@ -227,34 +237,38 @@ def extract_gateway(text: str) -> str:
     return "Not Found"
 
 def extract_mass_cards(text: str) -> list:
-    """Extrae TODAS las tarjetas APPROVED de un mensaje MASS."""
+    """Extrae TODAS las tarjetas APPROVED de un mensaje MASS (con [✅] seguido de Approved)."""
     mass_cards = []
     
-    pattern = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
-    matches = re.findall(pattern, text)
+    # Patrón para formato tipo [〄] Card: xxx + [〄] Status Approved! ✅ + [〄] Response Charged! [5$]
+    pattern = r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})[\s\S]*?Status\s*[:]?\s*Approved[\s\S]*?Response\s*[:]?\s*([^\n\r]+)'
+    matches = re.findall(pattern, text, re.IGNORECASE)
     
     if not matches:
-        pattern2 = r'(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
-        matches = re.findall(pattern2, text)
+        # Patrón alternativo con [〄]
+        pattern2 = r'\[〄\]\s*(?:Card|CC)\s*[:]?\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})[\s\S]*?\[〄\]\s*Status\s*[:]?\s*Approved[\s\S]*?\[〄\]\s*Response\s*[:]?\s*([^\n\r]+)'
+        matches = re.findall(pattern2, text, re.IGNORECASE)
+    
+    if not matches:
+        # Patrón con [✅] (formato Toxne)
+        pattern3 = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
+        for match in re.findall(pattern3, text):
+            if match[4] == '✅':
+                mass_cards.append({
+                    "card_info": f"{match[0]}|{match[1]}|{match[2]}|{match[3]}",
+                    "bin_number": match[0][:6],
+                    "response": clean_text(match[5].strip()),
+                })
+        return mass_cards
     
     for match in matches:
-        cc = match[0]
-        month = match[1]
-        year = match[2]
-        cvv = match[3]
-        emoji = match[4]
-        response = clean_text(match[5].strip())
-        
-        if emoji == '✅':
-            mass_cards.append({
-                "cc": cc,
-                "month": month,
-                "year": year,
-                "cvv": cvv,
-                "response": response,
-                "card_info": f"{cc}|{month}|{year}|{cvv}",
-                "bin_number": cc[:6]
-            })
+        card_info = f"{match[0]}|{match[1]}|{match[2]}|{match[3]}"
+        response = clean_text(match[4].strip())
+        mass_cards.append({
+            "card_info": card_info,
+            "bin_number": match[0][:6],
+            "response": response,
+        })
     
     return mass_cards
 
@@ -496,9 +510,11 @@ async def handler(event):
     if not msg.text:
         return
 
-    # ---------- DETECTAR SI ES MASS ----------
+    # ---------- DETECTAR SI ES MASS (cualquier formato con múltiples cards approved) ----------
     text_upper = msg.text.upper()
-    is_mass = 'MASS' in text_upper and ('[✅]' in msg.text or '[❌]' in msg.text)
+    # Detectar si tiene múltiples CCs
+    all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', msg.text)
+    is_mass = len(all_ccs) > 1
     
     if is_mass:
         print("\n" + "="*60)
@@ -506,6 +522,12 @@ async def handler(event):
         print("="*60)
         
         gateway = extract_gateway(msg.text)
+        
+        # Extraer info general (Banco, Country, Data)
+        bank = get_field_flexible(msg.text, ["BANK", "BANCO", "Banco"])
+        if bank != "Not Found":
+            bank = bank.upper()
+        
         country = get_field_flexible(msg.text, ["COUNTRY", "PAIS", "Pais"])
         flag = "❓"
         if country != "Not Found":
@@ -513,11 +535,10 @@ async def handler(event):
             if flag_match:
                 flag = flag_match.group(1)
                 country = re.sub(r'[\U0001F1E6-\U0001F1FF]+', '', country).strip()
+            country = re.sub(r'\s*-\s*[A-Z]{2,3}\s*$', '', country).strip()
             country = country.upper()
-        
-        bank = get_field_flexible(msg.text, ["BANK", "BANCO", "Banco"])
-        if bank != "Not Found":
-            bank = bank.upper()
+            if flag == "❓":
+                flag = get_flag_for_country(country)
         
         info_field = get_field_flexible(msg.text, ["BIN INFO", "INFO", "Data", "Info"])
         if info_field != "Not Found":
