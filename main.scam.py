@@ -110,7 +110,7 @@ def get_flag_for_country(country: str) -> str:
     return "❓"
 
 def get_field_flexible(text: str, field_names: list) -> str:
-    separators = r'[:|»➸↠\-–—┊⌁]'
+    separators = r'[:|»➸↠\-–—┊⌁➡️➡]'
     text_norm = normalize_text(text)
     
     for field_name in field_names:
@@ -143,12 +143,12 @@ def get_field_flexible(text: str, field_names: list) -> str:
 
 def extract_response(text: str) -> str:
     response_names = [
-        "R2", "RESPONSE", "RESULT", "MESSAGE", "MSG", "REPLY",
+        "RESULT", "R2", "RESPONSE", "MESSAGE", "MSG", "REPLY",
         "RESPUESTA", "RESULTADO", "MENSAJE", "R1"
     ]
     
     text_norm = normalize_text(text)
-    separators = r'[:|»➸↠\-–—┊⌁]'
+    separators = r'[:|»➸↠\-–—┊⌁➡️➡]'
     
     for name in response_names:
         patterns_misma_linea = [
@@ -166,7 +166,7 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆➖]', result)[0].strip()
                     if result and len(result) > 0:
                         return result
         
@@ -175,7 +175,7 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆➖]', result)[0].strip()
                     if result and len(result) > 0:
                         return result
         
@@ -188,7 +188,7 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆➖]', result)[0].strip()
                     if result and len(result) > 0:
                         return result
         
@@ -197,7 +197,7 @@ def extract_response(text: str) -> str:
             if match:
                 result = clean_text(match.group(1).strip())
                 if result and len(result) > 0 and result != "$0.0" and result != ":":
-                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                    result = re.split(r'[•━─=═▬▭■□●○◆◇★☆➖]', result)[0].strip()
                     if result and len(result) > 0:
                         return result
         
@@ -209,7 +209,7 @@ def extract_response(text: str) -> str:
                     if candidate and candidate != ":" and not re.match(r'^[:\-|»➸]+$', candidate):
                         result = clean_text(candidate)
                         if result and len(result) > 0 and result != ":":
-                            result = re.split(r'[•━─=═▬▭■□●○◆◇★☆]', result)[0].strip()
+                            result = re.split(r'[•━─=═▬▭■□●○◆◇★☆➖]', result)[0].strip()
                             if result and len(result) > 0:
                                 return result
     
