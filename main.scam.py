@@ -235,6 +235,20 @@ def extract_gateway(text: str) -> str:
         if gateway_name and len(gateway_name) < 30 and not re.search(r'^\d+$', gateway_name):
             return f"{gateway_name} {price}".upper()
     
+    # Buscar "⚶ Gate: X" o "Gate: X" o variantes
+    gate_patterns_directos = [
+        r'⚶\s*Gate\s*[:]\s*([^\n\r]+)',
+        r'Gate\s*[:]\s*([^\n\r]+)',
+        r'Gateway\s*[:]\s*([^\n\r]+)',
+        r'𝗚𝗮𝘁𝗲\s*[:]\s*([^\n\r]+)',
+    ]
+    for pattern in gate_patterns_directos:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            gate = clean_text(match.group(1).strip()).upper()
+            if gate and not re.search(r'\d{14,16}', gate):
+                return gate
+    
     gate = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     type_field = get_field_flexible(text, ["TYPE", "TIPO"])
     
@@ -277,6 +291,7 @@ def extract_mass_cards(text: str) -> list:
     
     text_limpio = text.replace('**', '').replace('__', '').replace('`', '')
     
+    # ---------- FORMATO TOXNE ----------
     pattern_toxne = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
     matches = re.findall(pattern_toxne, text_limpio)
     for match in matches:
@@ -291,6 +306,58 @@ def extract_mass_cards(text: str) -> list:
             encontradas.add(card_info)
             print(f"✅ TOXNE card detectada: {card_info} -> {response.strip()}")
     
+    # ---------- FORMATO MASS MODE (・Card: + ・Status: + ・Response:) ----------
+    if not mass_cards:
+        pattern_massmode = r'Card\s*[:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*[・•●◆◇▪▫\-]?\s*Status\s*[:]\s*([^\n\r]+)\s*\n\s*[・•●◆◇▪▫\-]?\s*Response\s*[:]\s*([^\n\r]+)'
+        matches = re.findall(pattern_massmode, text_limpio, re.IGNORECASE)
+        
+        for match in matches:
+            cc, month, year, cvv, status, response = match
+            card_info = f"{cc}|{month}|{year}|{cvv}"
+            
+            status_upper = status.upper()
+            has_success = any(word in status_upper for word in ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE'])
+            has_reject = any(word in status_upper for word in ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED'])
+            
+            if has_success and not has_reject and card_info not in encontradas:
+                mass_cards.append({
+                    "card_info": card_info,
+                    "bin_number": cc[:6],
+                    "response": clean_text(response.strip()),
+                })
+                encontradas.add(card_info)
+                print(f"✅ MASS MODE card detectada: {card_info} -> {response.strip()}")
+        
+        if not mass_cards:
+            pattern_simple = r'Card\s*[:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*[・•●◆◇▪▫\-]?\s*Status\s*[:]\s*([^\n\r]+)'
+            matches = re.findall(pattern_simple, text_limpio, re.IGNORECASE)
+            
+            for match in matches:
+                cc, month, year, cvv, status = match
+                card_info = f"{cc}|{month}|{year}|{cvv}"
+                
+                status_upper = status.upper()
+                has_success = any(word in status_upper for word in ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE'])
+                has_reject = any(word in status_upper for word in ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED'])
+                
+                if has_success and not has_reject and card_info not in encontradas:
+                    pos = text_limpio.find(card_info)
+                    if pos > 0:
+                        subtext = text_limpio[pos:pos+300]
+                        response_match = re.search(r'[・•●◆◇▪▫\-]?\s*Response\s*[:]\s*([^\n\r]+)', subtext, re.IGNORECASE)
+                        response = clean_text(response_match.group(1).strip()) if response_match else "Not Found"
+                    else:
+                        response = "Not Found"
+                    
+                    mass_cards.append({
+                        "card_info": card_info,
+                        "bin_number": cc[:6],
+                        "response": response,
+                    })
+                    encontradas.add(card_info)
+                    print(f"✅ MASS MODE card detectada (simple): {card_info} -> {response}")
+    
+    # ---------- FORMATO PAYEZZY ----------
     if not mass_cards:
         texto = text_limpio.replace('𝗖𝗮𝗿𝗱', 'Card').replace('𝗦𝘁𝗮𝘁𝘂𝘀', 'Status').replace('𝗥𝗲𝘀𝗽𝗼𝗻𝘀𝗲', 'Response')
         bloques = re.split(r'(?:Card|CC|Tarjeta)\s*[:]?\s*', texto, flags=re.IGNORECASE)
@@ -311,8 +378,12 @@ def extract_mass_cards(text: str) -> list:
             
             status_upper = status.upper()
             success_words = ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE']
+            reject_words = ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED']
             
-            if not any(word in status_upper for word in success_words):
+            has_success = any(word in status_upper for word in success_words)
+            has_reject = any(word in status_upper for word in reject_words)
+            
+            if not (has_success and not has_reject):
                 print(f"⏭️ Card {card_info} ignorada (status: {status.strip()})")
                 continue
             
