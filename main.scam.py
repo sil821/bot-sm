@@ -109,6 +109,31 @@ def get_flag_for_country(country: str) -> str:
             return flag
     return "❓"
 
+# 🔥 NUEVA FUNCIÓN: Quita el prefijo del seller del gateway
+def strip_gateway_prefix(gateway: str) -> str:
+    """Quita el prefijo del seller del gateway (ej: 'Curtys Braintree | Auth' -> 'Braintree | Auth')"""
+    if not gateway:
+        return gateway
+    
+    MAIN_GATEWAYS = [
+        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
+        'PAYFLOW', 'EAGLE', 'CHECKOUT', 'PAYEZZY', 'ATREUS', 'VBV',
+        '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
+        'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
+        'REALEX', 'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
+        'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
+        'PASARELA', 'RIN'
+    ]
+    
+    gateway_upper = gateway.upper()
+    for main_gw in MAIN_GATEWAYS:
+        idx = gateway_upper.find(main_gw)
+        if idx > 0:
+            result = gateway[idx:].strip()
+            result = re.sub(r'^[\s|:,\-–—➡️➡]+', '', result).strip()
+            return result
+    return gateway
+
 def get_field_flexible(text: str, field_names: list) -> str:
     separators = r'[:|»➸↠\-–—┊⌁➡️➡]'
     text_norm = normalize_text(text)
@@ -151,6 +176,7 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁➡️➡]'
     
     for name in response_names:
+        # 🔥 AÑADIDO ヾ⌿ y 🀄 como prefijos válidos
         patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
@@ -160,6 +186,8 @@ def extract_response(text: str) -> str:
             rf'〄\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'⪼\s*{name}\s*{separators}\s*([^\n\r]+)',
             rf'🔐\s*{name}\s*{separators}\s*([^\n\r]+)',
+            rf'ヾ⌿\s*{name}\s*{separators}\s*([^\n\r]+)',
+            rf'🀄\s*{name}\s*{separators}\s*([^\n\r]+)',
         ]
         for pattern in patterns_misma_linea:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -224,8 +252,13 @@ def extract_gateway(text: str) -> str:
         'WEBMONEY', 'PERFECT MONEY', 'PAYONEER', 'WORLDPAY', 'SAGE PAY',
         'REALEX', 'NMI', 'BLUE SNAP', 'VERIFONE', 'FIRST DATA',
         'ELAVON', 'PAYMENT DEPOT', 'DURANGO', 'BAMBORA', 'PROCESSOR',
-        'PASARELA', 'PAYMENT', 'RIN'
+        'PASARELA', 'PAYMENT', 'RIN', 'VBV 3D', 'VBV'
     ]
+    
+    # 🔥 PRIORIDAD MÁXIMA: Detectar "Gate: VBV 3D" primero
+    vbv_match = re.search(r'Gate\s*[:]\s*(VBV\s*3D)', text, re.IGNORECASE)
+    if vbv_match:
+        return "VBV 3D"
     
     first_line = text.split('\n')[0] if text else ""
     title_gateway_match = re.search(r'^\s*([^\[]+?)\s*\[(\d+\$?)\]', first_line.strip(), re.IGNORECASE)
@@ -233,21 +266,24 @@ def extract_gateway(text: str) -> str:
         gateway_name = clean_text(title_gateway_match.group(1)).strip()
         price = title_gateway_match.group(2).strip()
         if gateway_name and len(gateway_name) < 30 and not re.search(r'^\d+$', gateway_name):
-            return f"{gateway_name} {price}".upper()
+            result = f"{gateway_name} {price}".upper()
+            return strip_gateway_prefix(result)
     
-    # Buscar "⚶ Gate: X" o "Gate: X" o variantes
+    # 🔥 Buscar "⚶ Gate: X", "☇ Gate: X", "Gate: X" o variantes
     gate_patterns_directos = [
         r'⚶\s*Gate\s*[:]\s*([^\n\r]+)',
-        r'Gate\s*[:]\s*([^\n\r]+)',
+        r'☇\s*Gate\s*[:]\s*([^\n\r]+)',
+        r'(?:^|\s)Gate\s*[:]\s*([^\n\r]+)',
         r'Gateway\s*[:]\s*([^\n\r]+)',
         r'𝗚𝗮𝘁𝗲\s*[:]\s*([^\n\r]+)',
+        r'🀄\s*Gateway\s*[:]\s*([^\n\r]+)',
     ]
     for pattern in gate_patterns_directos:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
             gate = clean_text(match.group(1).strip()).upper()
             if gate and not re.search(r'\d{14,16}', gate):
-                return gate
+                return strip_gateway_prefix(gate)
     
     gate = get_field_flexible(text, ["GATEWAY", "GATE", "PASARELA", "𝑮𝑨𝑻𝑬", "𝐆𝐚𝐭𝐞", "𝗚𝗮𝘁𝗲"])
     type_field = get_field_flexible(text, ["TYPE", "TIPO"])
@@ -262,15 +298,17 @@ def extract_gateway(text: str) -> str:
             type_clean = clean_text(type_field).strip().upper()
             type_clean = re.split(r'\s*[|]\s*|\s+GATE\s*[:|]|\s+GATEWAY\s*[:|]', type_clean)[0].strip()
             if type_clean and len(type_clean) < 20 and not re.search(r'\d{14,16}', type_clean):
-                return f"{gate} {type_clean}"
-        return gate
+                result = f"{gate} {type_clean}"
+                return strip_gateway_prefix(result)
+        return strip_gateway_prefix(gate)
     
     for gw in GATEWAY_KEYWORDS:
         if gw in first_line.upper():
             match = re.search(r'#([A-Za-z]+)\s*~\s*([A-Za-z]+)', first_line, re.IGNORECASE)
             if match:
-                return f"{match.group(1).strip()} {match.group(2).strip()}".upper()
-            return gw.upper()
+                result = f"{match.group(1).strip()} {match.group(2).strip()}".upper()
+                return strip_gateway_prefix(result)
+            return strip_gateway_prefix(gw.upper())
     
     text_upper = text.upper()
     text_norm = normalize_text(text).upper()
@@ -281,7 +319,8 @@ def extract_gateway(text: str) -> str:
                 found_gateways.append(gw)
     
     if found_gateways:
-        return (' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]).upper()
+        result = (' | '.join(found_gateways) if len(found_gateways) > 1 else found_gateways[0]).upper()
+        return strip_gateway_prefix(result)
     
     return "Not Found"
 
