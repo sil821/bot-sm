@@ -109,7 +109,6 @@ def get_flag_for_country(country: str) -> str:
             return flag
     return "❓"
 
-# 🔥 NUEVA FUNCIÓN: Quita el prefijo del seller del gateway
 def strip_gateway_prefix(gateway: str) -> str:
     """Quita el prefijo del seller del gateway (ej: 'Curtys Braintree | Auth' -> 'Braintree | Auth')"""
     if not gateway:
@@ -176,7 +175,6 @@ def extract_response(text: str) -> str:
     separators = r'[:|»➸↠\-–—┊⌁➡️➡]'
     
     for name in response_names:
-        # 🔥 AÑADIDO ヾ⌿ y 🀄 como prefijos válidos
         patterns_misma_linea = [
             rf'{name}\s*{separators}\s*([^\n\r]+)',
             rf'{name}\s*:\s*([^\n\r]+)',
@@ -255,10 +253,17 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'PAYMENT', 'RIN', 'VBV 3D', 'VBV'
     ]
     
-    # 🔥 PRIORIDAD MÁXIMA: Detectar "Gate: VBV 3D" primero
+    # 🔥 PRIORIDAD 1: Detectar "Gate: VBV 3D"
     vbv_match = re.search(r'Gate\s*[:]\s*(VBV\s*3D)', text, re.IGNORECASE)
     if vbv_match:
         return "VBV 3D"
+    
+    # 🔥 PRIORIDAD 2: Detectar "#MassMode || Adyen" o "#MassMode || Payflow"
+    massmode_gate_match = re.search(r'#\w+\s*\|\|\s*([^\n\r]+)', text, re.IGNORECASE)
+    if massmode_gate_match:
+        gate = clean_text(massmode_gate_match.group(1).strip()).upper()
+        if gate and not re.search(r'\d{14,16}', gate):
+            return strip_gateway_prefix(gate)
     
     first_line = text.split('\n')[0] if text else ""
     title_gateway_match = re.search(r'^\s*([^\[]+?)\s*\[(\d+\$?)\]', first_line.strip(), re.IGNORECASE)
@@ -269,7 +274,7 @@ def extract_gateway(text: str) -> str:
             result = f"{gateway_name} {price}".upper()
             return strip_gateway_prefix(result)
     
-    # 🔥 Buscar "⚶ Gate: X", "☇ Gate: X", "Gate: X" o variantes
+    # Buscar "⚶ Gate: X", "☇ Gate: X", "Gate: X" o variantes
     gate_patterns_directos = [
         r'⚶\s*Gate\s*[:]\s*([^\n\r]+)',
         r'☇\s*Gate\s*[:]\s*([^\n\r]+)',
@@ -395,6 +400,28 @@ def extract_mass_cards(text: str) -> list:
                     })
                     encontradas.add(card_info)
                     print(f"✅ MASS MODE card detectada (simple): {card_info} -> {response}")
+    
+    # ---------- 🔥 NUEVO FORMATO MASS MODE 2 (Card: X - Status: Y \n Response: Z) ----------
+    if not mass_cards:
+        pattern_massmode2 = r'Card\s*[:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*-\s*Status\s*:\s*([^\n\r]+)\s*\n\s*Response\s*:\s*([^\n\r]+)'
+        matches = re.findall(pattern_massmode2, text_limpio, re.IGNORECASE)
+        
+        for match in matches:
+            cc, month, year, cvv, status, response = match
+            card_info = f"{cc}|{month}|{year}|{cvv}"
+            
+            status_upper = status.upper()
+            has_success = any(word in status_upper for word in ['APPROVED', 'APROBADA', 'LIVE', 'CHARGED', 'CHARGE', 'AUTH', 'AUTHORIZED', 'OK', 'VALID', 'ACTIVE'])
+            has_reject = any(word in status_upper for word in ['DECLINED', 'DENIED', 'REJECTED', 'ERROR', 'FAILED', 'EXPIRED', 'INVALID', 'BANNED', 'BLOCKED'])
+            
+            if has_success and not has_reject and card_info not in encontradas:
+                mass_cards.append({
+                    "card_info": card_info,
+                    "bin_number": cc[:6],
+                    "response": clean_text(response.strip()),
+                })
+                encontradas.add(card_info)
+                print(f"✅ MASS MODE 2 card detectada: {card_info} -> {response.strip()}")
     
     # ---------- FORMATO PAYEZZY ----------
     if not mass_cards:
