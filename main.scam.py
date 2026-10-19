@@ -657,8 +657,8 @@ async def send_card_message(card_data: dict, response_override: str = None):
  𐔌    ．⠀𝖣𝖠𝖳𝖠 𝖡𝖠𝖲𝖤 𝖤𝖷𝖳𝖱𝖠𝖲
 
 ⇢ <code>{ext1}</code>  
-⇢  <code>{ext2}</code>  
-⇢  <code>{ext3}</code> 
+⇢ <code>{ext2}</code>  
+⇢ <code>{ext3}</code> 
 """
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton("𖥻 INFO", url="https://t.me/infocherrys"),
