@@ -110,7 +110,6 @@ def get_flag_for_country(country: str) -> str:
     return "❓"
 
 def strip_gateway_prefix(gateway: str) -> str:
-    """Quita el prefijo del seller del gateway (ej: 'Curtys Braintree | Auth' -> 'Braintree | Auth')"""
     if not gateway:
         return gateway
     
@@ -243,7 +242,7 @@ def extract_response(text: str) -> str:
 
 def extract_gateway(text: str) -> str:
     GATEWAY_KEYWORDS = [
-        'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
+        'BRAINTREE VBV', 'BRAINTREE', 'STRIPE', 'ADYEN', 'PAYPAL', 'SHOPIFY', 'ZAREK',
         'PAYFLOW', 'EAGLE', 'CHECKOUT', 'AUTH', 'CHECKER', 'PAYEZZY',
         'CHK', 'PLUG', 'VITAL', 'AUTHORIZE', 'AUTHORIZED', 'ATREUS',
         '2CHECKOUT', 'PAYMENTWALL', 'PAYSAFE', 'SKRILL', 'NETELLER',
@@ -253,10 +252,14 @@ def extract_gateway(text: str) -> str:
         'PASARELA', 'PAYMENT', 'RIN', 'VBV 3D', 'VBV'
     ]
     
-    # 🔥 PRIORIDAD 1: Detectar "Gate: VBV 3D"
+    # 🔥 PRIORIDAD 1: Detectar "Gate: VBV 3D" o "Braintree VBV" en el título
     vbv_match = re.search(r'Gate\s*[:]\s*(VBV\s*3D)', text, re.IGNORECASE)
     if vbv_match:
         return "VBV 3D"
+        
+    title_vbv_match = re.search(r'\|\s*(BRAINTREE\s*VBV)', text, re.IGNORECASE)
+    if title_vbv_match:
+        return "BRAINTREE VBV"
     
     # 🔥 PRIORIDAD 2: Detectar "#MassMode || Adyen" o "#MassMode || Payflow"
     massmode_gate_match = re.search(r'#\w+\s*\|\|\s*([^\n\r]+)', text, re.IGNORECASE)
@@ -401,6 +404,32 @@ def extract_mass_cards(text: str) -> list:
                     encontradas.add(card_info)
                     print(f"✅ MASS MODE card detectada (simple): {card_info} -> {response}")
     
+    # ---------- 🔥 NUEVO FORMATO KAORI (Card: X \n Approved! | authenticate_attempt_successful | Y) ----------
+    if not mass_cards:
+        pattern_kaori = r'Card:\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*([^\n\r]+)'
+        matches = re.findall(pattern_kaori, text_limpio, re.IGNORECASE)
+        
+        for match in matches:
+            cc, month, year, cvv, status_line = match
+            card_info = f"{cc}|{month}|{year}|{cvv}"
+            
+            if 'APPROVED' in status_line.upper() and card_info not in encontradas:
+                # Extraer response: todo lo que va despues del primer |
+                if '|' in status_line:
+                    parts = status_line.split('|', 1)
+                    response = clean_text(parts[1].strip())
+                    response = re.sub(r'[✅❌]', '', response).strip()
+                else:
+                    response = clean_text(status_line)
+                
+                mass_cards.append({
+                    "card_info": card_info,
+                    "bin_number": cc[:6],
+                    "response": response,
+                })
+                encontradas.add(card_info)
+                print(f"✅ KAORI card detectada: {card_info} -> {response}")
+
     # ---------- 🔥 NUEVO FORMATO MASS MODE 2 (Card: X - Status: Y \n Response: Z) ----------
     if not mass_cards:
         pattern_massmode2 = r'Card\s*[:]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*-\s*Status\s*:\s*([^\n\r]+)\s*\n\s*Response\s*:\s*([^\n\r]+)'
