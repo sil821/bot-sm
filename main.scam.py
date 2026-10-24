@@ -269,6 +269,13 @@ def extract_gateway(text: str) -> str:
             return strip_gateway_prefix(gate)
     
     first_line = text.split('\n')[0] if text else ""
+    
+    # 🔥 PRIORIDAD 3: Gateway tipo "PayPal $5 MXN [PanPan] | #BIN410039"
+    title_pipe_gateway = re.search(r'^\s*(.+?)\s*\[[^\]]*\]\s*\|\s*#BIN', first_line, re.IGNORECASE)
+    if title_pipe_gateway:
+        result = clean_text(title_pipe_gateway.group(1).strip()).upper()
+        return strip_gateway_prefix(result)
+    
     title_gateway_match = re.search(r'^\s*([^\[]+?)\s*\[(\d+\$?)\]', first_line.strip(), re.IGNORECASE)
     if title_gateway_match:
         gateway_name = clean_text(title_gateway_match.group(1)).strip()
@@ -451,6 +458,24 @@ def extract_mass_cards(text: str) -> list:
                 })
                 encontradas.add(card_info)
                 print(f"✅ MASS MODE 2 card detectada: {card_info} -> {response.strip()}")
+    
+    # ---------- 🔥 NUEVO FORMATO PIPE [緒] | Card / [緒] | Status / [緒] | Response ----------
+    if not mass_cards:
+        pattern_pipe = r'\[[^\]]+\]\s*\|\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[[^\]]+\]\s*\|\s*([^\n\r]+)\s*\n\s*\[[^\]]+\]\s*\|\s*([^\n\r]+)'
+        matches = re.findall(pattern_pipe, text_limpio, re.IGNORECASE)
+
+        for match in matches:
+            cc, month, year, cvv, status_line, response_line = match
+            card_info = f"{cc}|{month}|{year}|{cvv}"
+
+            if 'APPROVED' in status_line.upper() and card_info not in encontradas:
+                mass_cards.append({
+                    "card_info": card_info,
+                    "bin_number": cc[:6],
+                    "response": clean_text(response_line.strip()),
+                })
+                encontradas.add(card_info)
+                print(f"✅ PIPE card detectada: {card_info} -> {response_line.strip()}")
     
     # ---------- FORMATO PAYEZZY ----------
     if not mass_cards:
@@ -749,7 +774,8 @@ async def handler(event):
     print("="*70)
 
     all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', texto_mensaje)
-    is_mass = len(all_ccs) > 1
+    # 🔥 AÑADIDO: también detecta mass si tiene formato [緒] | CC
+    is_mass = len(all_ccs) > 1 or bool(re.search(r'\[[^\]]+\]\s*\|\s*\d{14,16}\|', texto_mensaje))
     
     print(f"🔍 CCs encontradas: {len(all_ccs)}, Es mass: {is_mass}")
     
