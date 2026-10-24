@@ -339,7 +339,8 @@ def extract_mass_cards(text: str) -> list:
     mass_cards = []
     encontradas = set()
     
-    text_limpio = text.replace('**', '').replace('__', '').replace('`', '')
+    # 🔥 FIX: Normalizar \r\n a \n
+    text_limpio = text.replace('\r\n', '\n').replace('\r', '\n').replace('**', '').replace('__', '').replace('`', '')
     
     # ---------- FORMATO TOXNE ----------
     pattern_toxne = r'\[[\U0001F1E6-\U0001F1FF]+\]\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})\s*\n\s*\[([✅❌])\]\s*([^\n\r]+)'
@@ -455,23 +456,42 @@ def extract_mass_cards(text: str) -> list:
                 print(f"✅ MASS MODE 2 card detectada: {card_info} -> {response.strip()}")
     
     # ---------- FORMATO PIPE [緒] | Card / [緒] | Status / [緒] | Response ----------
+    # 🔥 FIX: Procesamiento línea por línea (más robusto que regex gigante)
     if not mass_cards:
-        # 🔥 FIX: [^\S\n]* en lugar de \s* para que matchee los saltos de línea correctamente
-        pattern_pipe = r'\[[^\]]+\]\s*\|\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})[^\S\n]*\n[^\S\n]*\[[^\]]+\]\s*\|\s*([^\n\r]+)[^\S\n]*\n[^\S\n]*\[[^\]]+\]\s*\|\s*([^\n\r]+)'
-        matches = re.findall(pattern_pipe, text_limpio, re.IGNORECASE)
-
-        for match in matches:
-            cc, month, year, cvv, status_line, response_line = match
-            card_info = f"{cc}|{month}|{year}|{cvv}"
-
-            if 'APPROVED' in status_line.upper() and card_info not in encontradas:
-                mass_cards.append({
-                    "card_info": card_info,
-                    "bin_number": cc[:6],
-                    "response": clean_text(response_line.strip()),
-                })
-                encontradas.add(card_info)
-                print(f"✅ PIPE card detectada: {card_info} -> {response_line.strip()}")
+        lineas_limpias = [l.strip() for l in text_limpio.split('\n')]
+        
+        for idx, linea in enumerate(lineas_limpias):
+            # Buscar línea con formato: [xxx] | CC|MM|YY|CVV
+            match_cc_line = re.match(r'^\[[^\]]+\]\s*\|\s*(\d{14,16})\|(\d{1,2})\|(\d{2,4})\|(\d{3,4})', linea, re.IGNORECASE)
+            if match_cc_line:
+                cc, month, year, cvv = match_cc_line.groups()
+                card_info = f"{cc}|{month}|{year}|{cvv}"
+                print(f"🔍 PIPE CC detectada en línea {idx}: {card_info}")
+                
+                # Buscar las siguientes 1-3 líneas
+                if idx + 2 < len(lineas_limpias):
+                    next_line = lineas_limpias[idx + 1]
+                    resp_line = lineas_limpias[idx + 2]
+                    
+                    # Verificar que la siguiente línea tenga APPROVED
+                    if 'APPROVED' in next_line.upper():
+                        print(f"🔍 PIPE Status APPROVED detectado: {next_line}")
+                        # Extraer response: todo después del primer |
+                        resp_match = re.match(r'^\[[^\]]+\]\s*\|\s*(.+)$', resp_line)
+                        if resp_match:
+                            response = clean_text(resp_match.group(1).strip())
+                            if card_info not in encontradas:
+                                mass_cards.append({
+                                    "card_info": card_info,
+                                    "bin_number": cc[:6],
+                                    "response": response,
+                                })
+                                encontradas.add(card_info)
+                                print(f"✅ PIPE card detectada: {card_info} -> {response}")
+                        else:
+                            print(f"⚠️ PIPE response no matcheó en línea: {resp_line}")
+                    else:
+                        print(f"⚠️ PIPE status no es APPROVED: {next_line}")
     
     # ---------- FORMATO PAYEZZY ----------
     if not mass_cards:
@@ -760,6 +780,8 @@ async def handler(event):
 
     texto_mensaje = re.sub(r'```[a-z]*\s*', '', texto_mensaje)
     texto_mensaje = texto_mensaje.replace('```', '')
+    # 🔥 FIX: Normalizar \r\n
+    texto_mensaje = texto_mensaje.replace('\r\n', '\n').replace('\r', '\n')
 
     print("\n" + "="*70)
     print("🔔 MENSAJE RECIBIDO")
@@ -770,7 +792,8 @@ async def handler(event):
     print("="*70)
 
     all_ccs = re.findall(r'\d{14,16}\|\d{1,2}\|\d{2,4}\|\d{3,4}', texto_mensaje)
-    is_mass = len(all_ccs) > 1 or bool(re.search(r'\[[^\]]+\]\s*\|\s*\d{14,16}\|', texto_mensaje))
+    # 🔥 FIX: Mejorar detección de mass para formato [緒] | CC
+    is_mass = len(all_ccs) > 1 or bool(re.search(r'\[[^\]]+\]\s*\|\s*\d{14,16}', texto_mensaje))
     
     print(f"🔍 CCs encontradas: {len(all_ccs)}, Es mass: {is_mass}")
     
